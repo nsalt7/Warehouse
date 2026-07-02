@@ -1,0 +1,12 @@
+{
+  "name": "rp-hypertrophy-local",
+  "version": "0.1.0",
+  "description": "Local-first rebuild of the RP Hypertrophy app's core features",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/engine.test.js test/api.test.js",
+    "test:e2e": "node test/e2e.test.js"
+  },
+  "license": "MIT"
+}
