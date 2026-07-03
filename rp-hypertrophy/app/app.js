@@ -353,8 +353,10 @@ function renderBuilder(fromMesoId = null) {
         environment: profile().environment || 'gym',
         days: [{ name: 'Day 1', slots: [] }],
         startVolumes: null,
+        priorities: {},
         templateId: null,
       };
+  draft.priorities = draft.priorities || {};
 
   function invalidDay() {
     return draft.days.findIndex((d) => d.slots.length === 0);
@@ -414,6 +416,8 @@ function renderBuilder(fromMesoId = null) {
         <button class="btn sm" id="add-day" data-testid="add-day" style="margin-top:10px">+ Add a day</button>
       </div>
 
+      <div class="section" id="focus-section"></div>
+
       <div class="sticky-bar"><div class="inner">
         <span class="muted small grow" id="builder-status"></span>
         <button class="btn primary" id="create" data-testid="create-meso">Create mesocycle</button>
@@ -447,6 +451,30 @@ function renderBuilder(fromMesoId = null) {
           <button class="btn sm" data-add-slot="${di}" data-testid="add-slot-${di}" disabled>Add</button>
         </div>
       </div>`).join('');
+
+    // Muscle focus: grow (engine climbs volume) vs maintain (holds a small,
+    // size-retaining dose — Bickel 2011). Only muscles actually in the plan.
+    const musclesInDraft = [...new Set(draft.days.flatMap((d) => d.slots.map((s) => getExercise(s.exerciseId).muscle)))];
+    const focusEl = document.getElementById('focus-section');
+    focusEl.innerHTML = musclesInDraft.length === 0 ? '' : `
+      <h2>Muscle focus</h2>
+      <p class="section-sub">Maintained muscles keep a small dose that preserves size — the recovery budget goes to the ones you're growing.</p>
+      <div class="card" data-testid="focus-panel">
+        ${musclesInDraft.map((m) => `
+          <div class="row spread" style="padding:5px 0">
+            <span class="chip muscle">${esc(m)}</span>
+            <div class="seg">
+              <button data-prio="${m}:grow" data-testid="prio-${m}-grow" class="${(draft.priorities[m] ?? 'grow') === 'grow' ? 'on' : ''}">Grow</button>
+              <button data-prio="${m}:maintain" data-testid="prio-${m}-maintain" class="${draft.priorities[m] === 'maintain' ? 'on' : ''}">Maintain</button>
+            </div>
+          </div>`).join('')}
+      </div>`;
+    focusEl.querySelectorAll('[data-prio]').forEach((el) => el.addEventListener('click', () => {
+      const [m, p] = el.dataset.prio.split(':');
+      if (p === 'grow') delete draft.priorities[m];
+      else draft.priorities[m] = 'maintain';
+      render();
+    }));
 
     const bad = invalidDay();
     const totalSlots = draft.days.reduce((a, d) => a + d.slots.length, 0);
@@ -485,6 +513,7 @@ function renderBuilder(fromMesoId = null) {
       draft.weeksTotal = t.weeksTotal;
       draft.startVolumes = null; // a fresh template starts at the landmarks
       draft.continuedFrom = null;
+      draft.priorities = { ...(t.priorities || {}) };
       // Auto-swap movements that clash with the user's profile.
       let swapped = 0;
       draft.days = t.days.map((d) => ({
@@ -615,11 +644,12 @@ function renderWorkout(meso, weekIndex, dayIndex) {
       <div class="card ex-card" data-testid="exercise-card">
         <div class="ex-head">
           <div>
-            <h3>${esc(wex.name)}</h3>
+            <h3><button class="ex-name" data-ex-info="${ei}" data-testid="ex-info-${ei}">${esc(wex.name)} <span class="faint">›</span></button></h3>
             <p class="ex-target">${targetLine(wex)}</p>
           </div>
           <span class="chip muscle">${esc(wex.muscle)}</span>
         </div>
+        ${meso.exerciseNotes?.[wex.exerciseId] ? `<div class="note-pin" data-testid="note-pin-${ei}">${esc(meso.exerciseNotes[wex.exerciseId])}</div>` : ''}
         <table class="set-table">
           <thead><tr>
             <th>Set</th><th>${wex.bodyweight ? `+${esc(meso.unit)}` : esc(meso.unit)}</th><th>Reps</th>${hasPrev ? '<th>Last</th>' : ''}<th></th>
@@ -706,6 +736,9 @@ function renderWorkout(meso, weekIndex, dayIndex) {
     persist();
     renderWorkout(meso, weekIndex, dayIndex);
   }));
+  app.querySelectorAll('[data-ex-info]').forEach((el) => el.addEventListener('click', () => {
+    openExerciseSheet(meso, weekIndex, dayIndex, workout.exercises[Number(el.dataset.exInfo)]);
+  }));
   document.getElementById('edit-program').addEventListener('click', () => {
     openProgramEditor(meso, weekIndex, dayIndex);
   });
@@ -714,6 +747,59 @@ function renderWorkout(meso, weekIndex, dayIndex) {
     stopRest();
     openFeedback(meso, weekIndex, dayIndex, workout);
   });
+}
+
+// --------------------------- exercise detail sheet ---------------------------
+
+function openExerciseSheet(meso, weekIndex, dayIndex, wex) {
+  const def = getExercise(wex.exerciseId);
+  meso.exerciseNotes ||= {};
+  const note = meso.exerciseNotes[wex.exerciseId] || '';
+  const recent = exerciseSeries(wex.name).slice(-5).reverse();
+  const priority = meso.priorities?.[wex.muscle];
+
+  modalRoot.innerHTML = `
+    <div class="modal-backdrop">
+      <div class="modal" data-testid="exercise-sheet">
+        <h2>${esc(wex.name)}</h2>
+        <div class="row" style="margin-top:8px">
+          <span class="chip muscle">${esc(wex.muscle)}</span>
+          <span class="chip">${esc(def?.equipment ?? '')}</span>
+          ${def?.lengthened ? '<span class="chip accent">stretch-biased</span>' : ''}
+          ${priority === 'maintain' ? '<span class="chip warn">maintaining</span>' : ''}
+        </div>
+        ${def?.cue ? `
+          <p class="eyebrow" style="margin-top:16px">Coach's cue</p>
+          <p class="muted small" style="margin:2px 0 0" data-testid="coach-cue">${esc(def.cue)}</p>` : ''}
+        <p class="eyebrow" style="margin-top:16px">Your note</p>
+        <textarea class="field" id="ex-note" data-testid="ex-note" rows="2" placeholder="Seat height, grip width, what to fix next time…"
+          style="width:100%; resize:vertical; margin-top:4px">${esc(note)}</textarea>
+        ${recent.length ? `
+          <p class="eyebrow" style="margin-top:16px">Recent sessions</p>
+          <table class="data-table" style="margin-top:2px">
+            ${recent.map((p) => `<tr>
+              <td>${p.label}</td>
+              <td class="r">${p.bw ? `BW × ${p.reps}` : `${fmtW(p.weight)} ${meso.unit} × ${p.reps}`}</td>
+              <td class="r"><b>${p.value}</b>${p.bw ? ' reps' : ''}</td>
+            </tr>`).join('')}
+          </table>` : ''}
+        <div class="modal-foot">
+          <button class="btn ghost" id="ex-close">Close</button>
+          <span class="grow"></span>
+          <button class="btn primary" id="ex-save" data-testid="ex-save">Save note</button>
+        </div>
+      </div>
+    </div>`;
+
+  document.getElementById('ex-close').onclick = () => { modalRoot.innerHTML = ''; };
+  document.getElementById('ex-save').onclick = () => {
+    const text = document.getElementById('ex-note').value.trim();
+    if (text) meso.exerciseNotes[wex.exerciseId] = text;
+    else delete meso.exerciseNotes[wex.exerciseId];
+    persist();
+    modalRoot.innerHTML = '';
+    renderWorkout(meso, weekIndex, dayIndex);
+  };
 }
 
 // ------------------------- mid-meso program editor ---------------------------
@@ -926,7 +1012,7 @@ function renderOverview(meso) {
           const lm = VOLUME_LANDMARKS[m] || { startVolume: 8, maxVolume: 20 };
           const pct = Math.min(100, (vol[m] / maxCap) * 100);
           return `<div class="vol-row">
-            <span class="vol-label">${esc(m)}</span>
+            <span class="vol-label">${esc(m)}${meso.priorities?.[m] === 'maintain' ? ' <span class="chip warn" style="font-size:10px; padding:1px 6px">maint</span>' : ''}</span>
             <div class="vol-track">
               <div class="vol-fill" style="width:${pct}%"></div>
               <span class="vol-tick" style="left:${(lm.startVolume / maxCap) * 100}%" title="start ${lm.startVolume}"></span>

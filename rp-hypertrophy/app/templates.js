@@ -106,6 +106,7 @@ export const TEMPLATES = [
   },
   {
     id: 'arm-specialization-4x',
+    priorities: { quads: 'maintain', hamstrings: 'maintain', calves: 'maintain' },
     name: 'Arm Specialization 4x',
     level: 'Advanced',
     description: 'Biceps and triceps 3x/week at high volume while legs and torso tick over at maintenance. Run for one meso, then return to balanced training.',
@@ -120,6 +121,7 @@ export const TEMPLATES = [
   },
   {
     id: 'chest-back-specialization-4x',
+    priorities: { quads: 'maintain', hamstrings: 'maintain', calves: 'maintain' },
     name: 'Chest & Back Specialization 4x',
     level: 'Advanced',
     description: 'Torso-focused meso: chest and back trained hard twice each with supersets in spirit, arms and legs at maintenance. For when the mirror says "more torso".',
@@ -134,6 +136,7 @@ export const TEMPLATES = [
   },
   {
     id: 'glute-emphasis-4x',
+    priorities: { chest: 'maintain', back: 'maintain', shoulders: 'maintain', biceps: 'maintain', triceps: 'maintain' },
     name: 'Glute & Hamstring Emphasis 4x',
     level: 'Intermediate',
     description: 'Lower-body-biased split with glutes and hamstrings leading every lower day and upper body held at a productive minimum.',

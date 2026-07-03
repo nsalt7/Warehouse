@@ -459,6 +459,41 @@ test('nextMesoConfig never floors below one set per slot', () => {
   }
 });
 
+test('maintain priority: starts at ~1/3 dose and never earns volume', () => {
+  const grow = createMesocycle(sampleConfig(6), 'g');
+  const maintain = createMesocycle({ ...sampleConfig(6), priorities: { chest: 'maintain' } }, 'm');
+  const vGrow = weeklySetsPerMuscle(grow.weeks[0], { fractional: false });
+  const vMaint = weeklySetsPerMuscle(maintain.weeks[0], { fractional: false });
+  assert.ok(vMaint.chest < vGrow.chest, `maintenance starts lower (${vMaint.chest} < ${vGrow.chest})`);
+  assert.equal(vMaint.quads, vGrow.quads, 'other muscles unaffected');
+
+  // two easy, progressing weeks: grow muscles earn +1, maintained chest holds
+  logWeek(maintain, 0, () => 100, () => 10);
+  logWeek(maintain, 1, (wex) => wex.targetWeight + 5, () => 10);
+  const v3 = weeklySetsPerMuscle(maintain.weeks[2], { fractional: false });
+  assert.equal(v3.chest, vMaint.chest, 'maintained muscle held its dose');
+  assert.equal(v3.quads, vMaint.quads + 1, 'growing muscle still earned a set');
+  // the brake still cuts a maintained muscle
+  assert.equal(volumeDelta(-1, false, 'maintain'), -1);
+  assert.equal(volumeDelta(1, false, 'maintain'), 0);
+});
+
+test('priorities carry into the next block without double-reducing volume', () => {
+  const meso = createMesocycle({ ...sampleConfig(5), priorities: { chest: 'maintain' } }, 'm1');
+  const startChest = weeklySetsPerMuscle(meso.weeks[0], { fractional: false }).chest;
+  const config = nextMesoConfig(meso);
+  assert.equal(config.priorities.chest, 'maintain');
+  const next = createMesocycle(config, 'm2');
+  const nextChest = weeklySetsPerMuscle(next.weeks[0], { fractional: false }).chest;
+  // startVolumes already reflect the maintenance dose; no second ÷3
+  assert.equal(nextChest, Math.max(1, startChest - 2) < 1 ? 1 : Math.max(1, startChest - 2), `${startChest} → ${nextChest}`);
+});
+
+test('every exercise ships with a coaching cue', () => {
+  const missing = EXERCISES.filter((e) => !e.cue || e.cue.length < 15).map((e) => e.name);
+  assert.deepEqual(missing, []);
+});
+
 test('environment filtering: home picker never offers gym machinery', () => {
   for (const m of ['chest', 'back', 'quads', 'hamstrings', 'glutes', 'shoulders']) {
     const list = exercisesForMuscle(m, 'home');

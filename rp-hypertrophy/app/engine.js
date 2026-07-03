@@ -269,8 +269,13 @@ export function muscleBrake(week, muscle) {
 //   perf +1 & brake  →  0        (progressing, but at high recovery cost)
 //   perf +1          → +1 set    (earned; dose-response rewards it — Schoenfeld
 //                                 2017, Pelland 2025; +1/week rate is convention)
-export function volumeDelta(perf, brake) {
+// A muscle set to 'maintain' never gains volume — muscle is retained on a
+// fraction of its building dose (Bickel 2011, MSSE: as little as 1/9 of the
+// training volume maintained size in young adults for 32 weeks), so
+// maintenance work stays cheap and the recovery budget goes to growth muscles.
+export function volumeDelta(perf, brake, priority = 'grow') {
   if (perf === -1) return brake ? -2 : -1;
+  if (priority === 'maintain') return 0;
   if (perf === 1 && !brake) return 1;
   return 0;
 }
@@ -341,12 +346,21 @@ export function createMesocycle(config, id) {
   // that muscle's slots, honoring the per-session cap.
   const slotsPerMuscle = {};
   for (const d of days) for (const s of d.slots) slotsPerMuscle[s.muscle] = (slotsPerMuscle[s.muscle] || 0) + 1;
+  const priorities = config.priorities || {};
   const perSlot = {};
   for (const [muscle, n] of Object.entries(slotsPerMuscle)) {
     // config.startVolumes lets a follow-up meso restart just below its last
-    // peak instead of at the generic landmark (see nextMesoConfig).
-    const start = config.startVolumes?.[muscle] ?? VOLUME_LANDMARKS[muscle]?.startVolume ?? 8;
-    perSlot[muscle] = Math.max(2, Math.min(5, Math.round(start / n)));
+    // peak instead of at the generic landmark (see nextMesoConfig); those
+    // values already reflect any maintenance reduction, so the maintenance
+    // divisor only applies to landmark-derived starts.
+    let start = config.startVolumes?.[muscle];
+    if (start == null) {
+      start = VOLUME_LANDMARKS[muscle]?.startVolume ?? 8;
+      // Maintenance dose ≈ one third of the building dose (Bickel 2011, MSSE —
+      // even 1/9 maintained size in young adults; 1/3 is the conservative pick).
+      if (priorities[muscle] === 'maintain') start = Math.max(2, Math.ceil(start / 3));
+    }
+    perSlot[muscle] = Math.max(priorities[muscle] === 'maintain' ? 1 : 2, Math.min(5, Math.round(start / n)));
   }
   // Per-session cap at creation too (Remmert 2025): if one day stacks several
   // slots of a muscle, trim the largest until the day fits.
@@ -370,6 +384,8 @@ export function createMesocycle(config, id) {
     weeksTotal: Math.max(4, Math.min(6, config.weeksTotal || 5)),
     unit: config.unit === 'kg' ? 'kg' : 'lb',
     environment: ['gym', 'calisthenics', 'home'].includes(config.environment) ? config.environment : 'gym',
+    priorities,
+    exerciseNotes: {},
     days,
     weeks: [],
     status: 'active',
@@ -494,7 +510,7 @@ export function generateNextWeek(meso) {
     const daySets = (muscle, di) => slotRefs.filter((r) => r.muscle === muscle && r.di === di).reduce((a, r) => a + r.sets, 0);
 
     for (const [muscle, sets] of Object.entries(current)) {
-      const delta = volumeDelta(prevWeek.perf[muscle] ?? 0, muscleBrake(prevWeek, muscle));
+      const delta = volumeDelta(prevWeek.perf[muscle] ?? 0, muscleBrake(prevWeek, muscle), meso.priorities?.[muscle]);
       const cap = VOLUME_LANDMARKS[muscle]?.maxVolume ?? 20;
       const target = Math.max(slotsPerMuscle[muscle], Math.min(cap, sets + delta));
       const slots = slotRefs.filter((r) => r.muscle === muscle);
@@ -595,6 +611,7 @@ export function nextMesoConfig(meso) {
     environment: meso.environment,
     days: meso.days.map((d) => ({ name: d.name, slots: d.slots.map((s) => ({ exerciseId: s.exerciseId })) })),
     startVolumes,
+    priorities: { ...(meso.priorities || {}) },
     continuedFrom: meso.id,
   };
 }

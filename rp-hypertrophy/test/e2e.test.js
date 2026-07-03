@@ -58,9 +58,29 @@ try {
   await page.selectOption('[data-testid="muscle-pick-1"]', 'quads');
   await page.selectOption('[data-testid="ex-pick-1"]', { label: 'Back Squat · stretch' });
   await page.click('[data-testid="add-slot-1"]');
+
+  // muscle focus panel: grow/maintain toggles per muscle in the plan
+  await page.waitForSelector('[data-testid="focus-panel"]');
+  await page.click('[data-testid="prio-chest-maintain"]');
+  await page.waitForFunction(() => document.querySelector('[data-testid="prio-chest-maintain"]').classList.contains('on'));
+  await page.click('[data-testid="prio-chest-grow"]'); // back to grow for the rest of the flow
+  step('muscle focus: grow/maintain toggles work in the builder');
+
   await page.click('[data-testid="create-meso"]');
   await page.waitForSelector('[data-testid="workout-title"]');
   step('custom mesocycle created via the builder');
+
+  // ---- exercise detail sheet: coach cue + pinned note ----
+  await page.click('[data-testid="ex-info-0"]');
+  await page.waitForSelector('[data-testid="exercise-sheet"]');
+  const cue = await page.textContent('[data-testid="coach-cue"]');
+  assert(cue.length > 15, 'coach cue present');
+  await page.fill('[data-testid="ex-note"]', 'Seat at 4, deep stretch');
+  await page.click('[data-testid="ex-save"]');
+  await page.waitForSelector('[data-testid="note-pin-0"]');
+  const pin = await page.textContent('[data-testid="note-pin-0"]');
+  assert(pin.includes('Seat at 4'), 'pinned note shows on the exercise card');
+  step('exercise sheet: coach cue shown, note pinned to the card');
 
   const rir1 = await page.textContent('[data-testid="rir-chip"]');
   assert(rir1.includes('3 RIR'), `week 1 compounds at 3 RIR, got "${rir1}"`);

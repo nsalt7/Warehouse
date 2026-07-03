@@ -2,12 +2,24 @@
 
 ## Part 1: The market reference (RP Hypertrophy app)
 
-The RP Hypertrophy app (Renaissance Periodization, ~$35/month) organizes training
-into 4–6 week mesocycles plus a deload, prescribes Reps-In-Reserve (RIR) targets
-that ramp toward failure, and autoregulates weekly set counts from post-workout
-questions (soreness, pump, workload) against per-muscle volume landmarks
-(MEV/MAV/MRV). Its price is carried by three things: the progression algorithm,
-~45 expert templates, and RP's brand/coaching content.
+The RP Hypertrophy app (Renaissance Periodization; App Store pricing as of
+mid-2026: **$59.99/month or $499.99/year**) organizes training into 4–6 week
+mesocycles plus a deload, prescribes Reps-In-Reserve (RIR) targets that ramp
+toward failure, and autoregulates weekly set counts from post-workout questions
+(soreness, pump, workload-as-volume) against per-muscle volume landmarks
+(MEV/MAV/MRV). From its App Store screenshots, the paid feature set is: the
+progression algorithm; 100+ templates (incl. athlete-designed and bodypart
+specialization); 300+ exercises with grip/angle variants; 250+ technique videos
+with per-exercise pinned notes and history; per-muscle grow/maintain selection;
+muscle-group weekly-set stats; set types (regular/myorep/myorep-match); and
+per-exercise joint-pain feedback. Our check-in questions turned out to mirror
+theirs almost word-for-word, independently derived from the same literature.
+
+Feature-gap status in this app: grow/maintain ✅ (evidence-based: Bickel 2011),
+pinned notes ✅, per-exercise coach cues ✅ (our answer to technique videos),
+exercise detail + history ✅, muscle weekly-set stats ✅, variant-rich library
+partially (≈90 vs 300+), set types (myoreps etc.) not yet — deliberately, until
+the evidence case is made.
 
 Sources: [RP Hypertrophy page](https://rpstrength.com/pages/hypertrophy-app),
 [RP: Progressing for Hypertrophy](https://rpstrength.com/blogs/articles/progressing-for-hypertrophy),
