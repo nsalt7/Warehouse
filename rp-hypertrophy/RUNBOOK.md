@@ -65,9 +65,10 @@ generated, and `npm run ios:sync` copies the web app into it.
   is **CloudKit** via a Capacitor plugin (Apple-native, free, no Sign-in-with-
   Apple obligations because there's no third-party login). Revisit only when
   users ask for it.
-- **Haptics/notifications**: `@capacitor/haptics` and `@capacitor/local-notifications`
-  are drop-in plugins; the rest-timer chime is the natural first haptic. Ask
-  for a code round when you want them.
+- ~~Haptics/notifications~~ **shipped**: set-logging taps and rest-timer
+  completion use native haptics, and the rest timer schedules a local
+  notification so it fires even with the phone locked (iOS will ask for
+  notification permission the first time a rest starts).
 - **Set types (myoreps/drop sets)**: parked pending evidence review (they
   mainly save time at equal growth).
 

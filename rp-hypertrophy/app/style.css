@@ -399,3 +399,13 @@ select.field { appearance: none; padding-right: 30px; background-image: url("dat
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
 .hidden { display: none !important; }
+
+/* ---------- meso report ---------- */
+.report-grid { display: flex; gap: 10px; justify-content: center; margin-top: 20px; }
+.report-tile {
+  background: var(--well); border-radius: var(--radius); padding: 12px 20px;
+  display: flex; flex-direction: column; align-items: center; min-width: 90px;
+}
+.report-tile b { font-size: 22px; letter-spacing: -0.02em; }
+.report-tile span { font-size: 11px; color: var(--ink-3); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+.warmup-line { color: var(--ink-3); }

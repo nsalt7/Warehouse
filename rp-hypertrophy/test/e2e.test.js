@@ -172,6 +172,20 @@ try {
 
   // ---- week 2: beat week 1 → volume is earned ----
   await logWorkout({ weight: 105, reps: 10 });
+
+  // day 2 is Back Squat @100 lb — warm-up ramp, plate calculator, finisher
+  await page.waitForSelector('[data-testid="warmup-0"]');
+  const warmup = await page.textContent('[data-testid="warmup-0"]');
+  assert(warmup.includes('50×8') && warmup.includes('85×2'), `warm-up ramp rendered (${warmup})`);
+  await page.click('[data-testid="ex-info-0"]');
+  await page.waitForSelector('[data-testid="plate-calc"]');
+  const plates = await page.textContent('[data-testid="plate-calc"]');
+  assert(plates.includes('Bar 45') && plates.includes('25×1'), `plate breakdown correct (${plates})`);
+  await page.click('[data-testid="finisher-myo"]');
+  await page.click('[data-testid="ex-save"]');
+  await page.waitForSelector('[data-testid="finisher-chip-0"]');
+  step('warm-up ramp, plate calculator, and myo-rep finisher all wired');
+
   await logWorkout({ weight: 105, reps: 10 });
   s = await readState(page);
   meso = s.mesocycles[0];
@@ -265,6 +279,18 @@ try {
   s = await readState(page);
   assert(s.mesocycles[1].weeks[0].workouts[0].skipped === true, 'workout recorded as skipped');
   step('skip workout: day closed, position advanced');
+
+  // ---- swap a movement in place (day 2 of the next block: Back Squat) ----
+  await page.click('[data-testid="ex-info-0"]');
+  await page.waitForSelector('[data-testid="swap-pick"]');
+  await page.selectOption('[data-testid="swap-pick"]', 'front-squat');
+  await page.click('[data-testid="swap-go"]');
+  await page.waitForSelector('[data-testid="confirm-modal"]');
+  await page.click('[data-testid="confirm-yes"]');
+  await page.waitForFunction(() => document.querySelector('[data-testid="ex-info-0"]')?.textContent.includes('Front Squat'));
+  s = await readState(page);
+  assert(s.mesocycles[1].days[1].slots[0].name === 'Front Squat', 'program updated by the swap');
+  step('in-place exercise swap: slot replaced, program rewritten from this session on');
 
   // ---- profile conditions swap template movements ----
   await page.click('[data-testid="nav-data"]');

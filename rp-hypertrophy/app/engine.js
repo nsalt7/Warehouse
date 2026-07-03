@@ -308,7 +308,7 @@ function makeSets(count) {
 
 function slotFrom(def) {
   const { id: exerciseId, muscle, name, type, region, repRange, secondary, equipment } = def;
-  return { exerciseId, muscle, name, type, region, repRange, secondary, equipment, bodyweight: equipment === 'bodyweight' };
+  return { exerciseId, muscle, name, type, region, repRange, secondary, equipment, bodyweight: equipment === 'bodyweight', finisher: null };
 }
 
 function slotToWex(slot, prescription) {
@@ -324,6 +324,7 @@ function slotToWex(slot, prescription) {
     targetWeight: prescription.targetWeight ?? null,
     missStreak: prescription.missStreak ?? 0,
     prevSets: prescription.prevSets ?? null,
+    finisher: slot.finisher ?? null,
     jointPain: 0,
     sets: makeSets(prescription.sets),
   };
@@ -625,6 +626,99 @@ export function currentPosition(meso) {
 export function e1rm(weight, reps) {
   if (weight == null || reps == null || reps <= 0) return null;
   return Math.round(weight * (1 + reps / 30));
+}
+
+// ----------------------------- gym utilities --------------------------------
+
+export const BAR_WEIGHT = { lb: 45, kg: 20 };
+const PLATES = { lb: [45, 35, 25, 10, 5, 2.5], kg: [25, 20, 15, 10, 5, 2.5, 1.25] };
+
+// Warm-up ramp for loaded compounds: ~50/70/85% of the working weight at
+// falling reps. Warm-up prescriptions are practicality, not hypertrophy dosing
+// — ramps this shape preserve working-set performance without adding fatigue
+// (general potentiation literature; exact percentages are convention).
+export function warmupPlan(exercise, targetWeight, unit) {
+  if (targetWeight == null || exercise.type !== 'compound') return [];
+  const barMin = ['barbell', 'smith'].includes(exercise.equipment) ? BAR_WEIGHT[unit] : 0;
+  const steps = [[0.5, 8], [0.7, 4], [0.85, 2]];
+  const plan = [];
+  for (const [pct, reps] of steps) {
+    const w = Math.max(barMin, roundLoad(targetWeight * pct, unit));
+    if (w >= targetWeight * 0.95) continue;      // pointless step, too close to work weight
+    if (plan.length && plan[plan.length - 1].weight >= w) continue;
+    plan.push({ weight: w, reps });
+  }
+  return plan;
+}
+
+// Per-side plate breakdown for barbell/smith lifts (a standing complaint about
+// the competitor app is the missing plate calculator).
+export function plateBreakdown(targetWeight, unit, equipment) {
+  if (targetWeight == null || !['barbell', 'smith'].includes(equipment)) return null;
+  const bar = BAR_WEIGHT[unit];
+  if (targetWeight < bar) return { bar, perSide: [], remainder: 0, below: true };
+  let perSideLoad = (targetWeight - bar) / 2;
+  const perSide = [];
+  for (const plate of PLATES[unit]) {
+    const count = Math.floor(perSideLoad / plate + 1e-9);
+    if (count > 0) {
+      perSide.push({ plate, count });
+      perSideLoad -= count * plate;
+    }
+  }
+  return { bar, perSide, remainder: Math.round(perSideLoad * 100) / 100, below: false };
+}
+
+// Swap a movement in place (same slot, same set count) — the program keeps its
+// shape, the new movement calibrates fresh. Applies to the pending week and
+// every generated week after.
+export function swapExercise(meso, dayIndex, slotIndex, newExerciseId) {
+  const day = meso.days[dayIndex];
+  if (!day || !day.slots[slotIndex]) throw new Error('No such exercise');
+  const def = getExercise(newExerciseId);
+  if (!def) throw new Error('Unknown exercise');
+  if (!def.envs.includes(meso.environment)) throw new Error(`${def.name} is not available in this training environment`);
+  const oldSlot = day.slots[slotIndex];
+  const occurrence = day.slots.slice(0, slotIndex).filter((s) => s.exerciseId === oldSlot.exerciseId).length;
+  const slot = slotFrom(def);
+  day.slots[slotIndex] = slot;
+  const week = meso.weeks[meso.weeks.length - 1];
+  const workout = week.workouts[dayIndex];
+  if (workout && workout.status !== 'done') {
+    let seen = 0;
+    const i = workout.exercises.findIndex((e) => e.exerciseId === oldSlot.exerciseId && seen++ === occurrence);
+    if (i >= 0) {
+      workout.exercises[i] = slotToWex(slot, { sets: workout.exercises[i].sets.length, targetWeight: null });
+    }
+  }
+  return def;
+}
+
+// Optional finisher on an exercise's last set — 'myo' (myo-rep block: mini
+// sets of 3-5 reps on short rests after the last full set) or 'drop' (strip
+// ~25% and continue to the same proximity to failure). These are time-savers,
+// not magic: drop sets produce similar hypertrophy to straight sets in about
+// half the session time (Sødal 2023, Sports Med Open systematic review;
+// Angleri 2017, EJAP — no superiority over traditional), and rest-pause/myo
+// work sits in the same evidence family (Prestes 2019, JSCR). The engine
+// counts the finisher block as ONE hard set (consistent with the hard-set
+// convention) — log the total reps you got across the block.
+export function setFinisher(meso, dayIndex, slotIndex, style) {
+  const day = meso.days[dayIndex];
+  if (!day || !day.slots[slotIndex]) throw new Error('No such exercise');
+  const valid = [null, 'myo', 'drop'];
+  if (!valid.includes(style)) throw new Error('Unknown finisher');
+  const slot = day.slots[slotIndex];
+  const occurrence = day.slots.slice(0, slotIndex).filter((s) => s.exerciseId === slot.exerciseId).length;
+  slot.finisher = style;
+  const week = meso.weeks[meso.weeks.length - 1];
+  const workout = week?.workouts[dayIndex];
+  if (workout && workout.status !== 'done') {
+    let seen = 0;
+    const i = workout.exercises.findIndex((e) => e.exerciseId === slot.exerciseId && seen++ === occurrence);
+    if (i >= 0) workout.exercises[i].finisher = style;
+  }
+  return style;
 }
 
 // ------------------------- next-meso continuity ------------------------------

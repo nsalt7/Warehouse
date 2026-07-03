@@ -42,8 +42,12 @@ JSON file you can restore on any machine.
 2. **Week 1 calibrates** — find working weights for the shown rep range at the
    target RIR. The engine adopts what you actually lift.
 3. **Train and check in** — log weight × reps per set (one-tap logging adopts
-   your targets), rest timer runs between sets, and after each workout you answer
-   three questions per muscle plus an optional joint-pain flag.
+   your targets), warm-up ramps and a plate calculator handle the bar math,
+   the rest timer runs between sets (haptics + a local notification in the iOS
+   app), and after each workout you answer three questions per muscle plus an
+   optional joint-pain flag. Tap any exercise for its coach's cue, technique
+   video search, pinned note, recent history, optional myo-rep/drop-set
+   finisher, or an in-place swap.
 4. **The engine programs next week** —
    - beat last week on a muscle's exercises → it earns a set (up to a per-muscle
      weekly ceiling and an 8-set per-session cap)

@@ -3,7 +3,8 @@
 
 import {
   createMesocycle, finishWorkout, skipWorkout, currentPosition, weeklySetsPerMuscle,
-  addExercise, removeExercise, e1rm, nextMesoConfig,
+  addExercise, removeExercise, swapExercise, setFinisher, e1rm, nextMesoConfig,
+  warmupPlan, plateBreakdown,
   SORENESS, WORKLOAD, PUMP, JOINT_PAIN, REST_SECONDS,
 } from './engine.js';
 import {
@@ -66,6 +67,34 @@ function confirmModal({ title, body, action = 'Delete', danger = true }) {
   });
 }
 
+// Native niceties inside the Capacitor shell; silent no-ops in a browser.
+const native = () => globalThis.Capacitor?.Plugins ?? {};
+function haptic(kind) {
+  try {
+    if (kind === 'tap') native().Haptics?.impact({ style: 'MEDIUM' });
+    else native().Haptics?.notification({ type: 'SUCCESS' });
+  } catch { /* no haptics available */ }
+}
+const REST_NOTIFICATION_ID = 911;
+async function scheduleRestNotification(seconds) {
+  const LN = native().LocalNotifications;
+  if (!LN) return;
+  try {
+    let perm = await LN.checkPermissions();
+    if (perm.display === 'prompt') perm = await LN.requestPermissions();
+    if (perm.display !== 'granted') return;
+    await LN.schedule({ notifications: [{
+      id: REST_NOTIFICATION_ID,
+      title: 'Rest over',
+      body: 'Next set.',
+      schedule: { at: new Date(Date.now() + seconds * 1000) },
+    }] });
+  } catch { /* notifications unavailable */ }
+}
+function cancelRestNotification() {
+  try { native().LocalNotifications?.cancel({ notifications: [{ id: REST_NOTIFICATION_ID }] }); } catch { /* ok */ }
+}
+
 // A short two-tone chime for the rest timer (no audio assets needed).
 function chime() {
   try {
@@ -111,11 +140,13 @@ function startRest(seconds, label) {
     restRoot.querySelector('.rest-timer').onclick = stopRest;
   };
   render();
+  scheduleRestNotification(seconds);
   restInterval = setInterval(() => {
     left -= 1;
     if (left <= 0) {
       stopRest();
       chime();
+      haptic('done');
       toast('Rest over — next set.', 2200);
       return;
     }
@@ -126,6 +157,7 @@ function stopRest() {
   clearInterval(restInterval);
   restInterval = null;
   restRoot.innerHTML = '';
+  cancelRestNotification();
 }
 
 // ------------------------------- router -------------------------------------
@@ -657,6 +689,11 @@ function renderWorkout(meso, weekIndex, dayIndex) {
           </div>
           <span class="chip muscle">${esc(wex.muscle)}</span>
         </div>
+        ${wex.finisher ? `<div class="row" style="margin-top:6px"><span class="chip accent" data-testid="finisher-chip-${ei}">${wex.finisher === 'myo' ? 'Myo-rep finisher on the last set' : 'Drop-set finisher on the last set'}</span></div>` : ''}
+        ${(() => {
+          const wu = week.isDeload ? [] : warmupPlan(wex, wex.targetWeight, meso.unit);
+          return wu.length ? `<p class="ex-target warmup-line num" data-testid="warmup-${ei}">Warm-up: ${wu.map((st) => `${fmtW(st.weight)}×${st.reps}`).join(' · ')}</p>` : '';
+        })()}
         ${meso.exerciseNotes?.[wex.exerciseId] ? `<div class="note-pin" data-testid="note-pin-${ei}">${esc(meso.exerciseNotes[wex.exerciseId])}</div>` : ''}
         <table class="set-table">
           <thead><tr>
@@ -727,6 +764,7 @@ function renderWorkout(meso, weekIndex, dayIndex) {
     persist();
     renderWorkout(meso, weekIndex, dayIndex);
     if (set.done && workout.status !== 'done') {
+      haptic('tap');
       startRest(REST_SECONDS[wex.type] ?? 120, wex.type === 'compound' ? 'compound' : 'isolation');
     }
   }));
@@ -748,7 +786,7 @@ function renderWorkout(meso, weekIndex, dayIndex) {
     renderWorkout(meso, weekIndex, dayIndex);
   }));
   app.querySelectorAll('[data-ex-info]').forEach((el) => el.addEventListener('click', () => {
-    openExerciseSheet(meso, weekIndex, dayIndex, workout.exercises[Number(el.dataset.exInfo)]);
+    openExerciseSheet(meso, weekIndex, dayIndex, Number(el.dataset.exInfo));
   }));
   document.getElementById('edit-program').addEventListener('click', () => {
     openProgramEditor(meso, weekIndex, dayIndex);
@@ -778,17 +816,36 @@ function renderWorkout(meso, weekIndex, dayIndex) {
 
 // --------------------------- exercise detail sheet ---------------------------
 
-function openExerciseSheet(meso, weekIndex, dayIndex, wex) {
+// Map a workout-exercise position to its program slot (Nth occurrence of the
+// same exercise id, since the arrays stay parallel for pending weeks).
+function slotIndexFor(meso, dayIndex, workout, exIndex) {
+  const wex = workout.exercises[exIndex];
+  const occurrence = workout.exercises.slice(0, exIndex).filter((e) => e.exerciseId === wex.exerciseId).length;
+  let seen = 0;
+  return meso.days[dayIndex].slots.findIndex((s) => s.exerciseId === wex.exerciseId && seen++ === occurrence);
+}
+
+function openExerciseSheet(meso, weekIndex, dayIndex, exIndex) {
+  const workout = meso.weeks[weekIndex].workouts[dayIndex];
+  const wex = workout.exercises[exIndex];
   const def = getExercise(wex.exerciseId);
   meso.exerciseNotes ||= {};
   const note = meso.exerciseNotes[wex.exerciseId] || '';
   const recent = exerciseSeries(wex.name).slice(-5).reverse();
   const priority = meso.priorities?.[wex.muscle];
+  const slotIndex = slotIndexFor(meso, dayIndex, workout, exIndex);
+  const slot = meso.days[dayIndex].slots[slotIndex];
+  const plates = plateBreakdown(wex.targetWeight, meso.unit, def?.equipment);
+  const swapOptions = exercisesForMuscle(wex.muscle, meso.environment).filter((x) => x.id !== wex.exerciseId);
+  const videoUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(`${wex.name} technique`)}`;
 
   modalRoot.innerHTML = `
     <div class="modal-backdrop">
       <div class="modal" data-testid="exercise-sheet">
-        <h2>${esc(wex.name)}</h2>
+        <div class="row spread">
+          <h2>${esc(wex.name)}</h2>
+          <a class="btn ghost sm" href="${videoUrl}" target="_blank" rel="noopener" data-testid="video-link">Technique ▸</a>
+        </div>
         <div class="row" style="margin-top:8px">
           <span class="chip muscle">${esc(wex.muscle)}</span>
           <span class="chip">${esc(def?.equipment ?? '')}</span>
@@ -798,6 +855,18 @@ function openExerciseSheet(meso, weekIndex, dayIndex, wex) {
         ${def?.cue ? `
           <p class="eyebrow" style="margin-top:16px">Coach's cue</p>
           <p class="muted small" style="margin:2px 0 0" data-testid="coach-cue">${esc(def.cue)}</p>` : ''}
+        ${plates && !plates.below ? `
+          <p class="eyebrow" style="margin-top:16px">Load the bar — ${fmtW(wex.targetWeight)} ${esc(meso.unit)}</p>
+          <p class="muted small num" style="margin:2px 0 0" data-testid="plate-calc">
+            Bar ${plates.bar} + per side: ${plates.perSide.length ? plates.perSide.map((p) => `${fmtW(p.plate)}×${p.count}`).join(' · ') : 'nothing'}${plates.remainder ? ` (+${fmtW(plates.remainder)} short — use micros or round)` : ''}
+          </p>` : ''}
+        ${slot ? `
+          <p class="eyebrow" style="margin-top:16px">Last-set finisher</p>
+          <p class="faint small" style="margin:2px 0 6px">Time-savers, not magic — drop sets match straight sets for growth in about half the time. The block counts as one hard set; log its total reps.</p>
+          <div class="seg" data-testid="finisher-seg">
+            ${[[null, 'Straight'], ['myo', 'Myo-reps'], ['drop', 'Drop set']].map(([v, label]) =>
+              `<button data-finisher="${v ?? ''}" class="${(slot.finisher ?? null) === v ? 'on' : ''}" data-testid="finisher-${v ?? 'none'}">${label}</button>`).join('')}
+          </div>` : ''}
         <p class="eyebrow" style="margin-top:16px">Your note</p>
         <textarea class="field" id="ex-note" data-testid="ex-note" rows="2" placeholder="Seat height, grip width, what to fix next time…"
           style="width:100%; resize:vertical; margin-top:4px">${esc(note)}</textarea>
@@ -810,15 +879,51 @@ function openExerciseSheet(meso, weekIndex, dayIndex, wex) {
               <td class="r"><b>${p.value}</b>${p.bw ? ' reps' : ''}</td>
             </tr>`).join('')}
           </table>` : ''}
+        ${slot && swapOptions.length ? `
+          <p class="eyebrow" style="margin-top:16px">Swap this movement</p>
+          <p class="faint small" style="margin:2px 0 6px">Same slot and set count; the new movement calibrates fresh. Applies from this session onward.</p>
+          <div class="row">
+            <select class="field grow" id="swap-pick" data-testid="swap-pick">
+              <option value="">Choose a replacement…</option>
+              ${swapOptions.map((x) => `<option value="${x.id}">${esc(exOptionLabel(x))}</option>`).join('')}
+            </select>
+            <button class="btn sm" id="swap-go" data-testid="swap-go" disabled>Swap</button>
+          </div>` : ''}
         <div class="modal-foot">
           <button class="btn ghost" id="ex-close">Close</button>
           <span class="grow"></span>
-          <button class="btn primary" id="ex-save" data-testid="ex-save">Save note</button>
+          <button class="btn primary" id="ex-save" data-testid="ex-save">Save</button>
         </div>
       </div>
     </div>`;
 
   document.getElementById('ex-close').onclick = () => { modalRoot.innerHTML = ''; };
+  modalRoot.querySelectorAll('[data-finisher]').forEach((el) => el.addEventListener('click', () => {
+    const style = el.dataset.finisher === '' ? null : el.dataset.finisher;
+    setFinisher(meso, dayIndex, slotIndex, style);
+    persist();
+    modalRoot.querySelectorAll('[data-finisher]').forEach((b) => b.classList.toggle('on', b === el));
+  }));
+  const swapPick = document.getElementById('swap-pick');
+  const swapGo = document.getElementById('swap-go');
+  if (swapPick) {
+    swapPick.onchange = () => { swapGo.disabled = !swapPick.value; };
+    swapGo.onclick = async () => {
+      const target = getExercise(swapPick.value);
+      const ok = await confirmModal({
+        title: `Swap to ${target.name}?`,
+        body: `${wex.name} leaves the program from this session onward. Logged history is kept.`,
+        action: 'Swap',
+        danger: false,
+      });
+      if (!ok) { openExerciseSheet(meso, weekIndex, dayIndex, exIndex); return; }
+      swapExercise(meso, dayIndex, slotIndex, target.id);
+      persist();
+      modalRoot.innerHTML = '';
+      toast(`${target.name} is in. It calibrates this session.`);
+      renderWorkout(meso, weekIndex, dayIndex);
+    };
+  }
   document.getElementById('ex-save').onclick = () => {
     const text = document.getElementById('ex-note').value.trim();
     if (text) meso.exerciseNotes[wex.exerciseId] = text;
@@ -1263,7 +1368,47 @@ function renderHistory(selectedName = null) {
 
 // ------------------------------ complete -------------------------------------
 
+function mesoReport(meso) {
+  let done = 0, skipped = 0, setsLogged = 0;
+  for (const week of meso.weeks) {
+    for (const w of week.workouts) {
+      if (w.status !== 'done') continue;
+      if (w.skipped) { skipped += 1; continue; }
+      done += 1;
+      for (const wex of w.exercises) setsLogged += wex.sets.filter((x) => x.done).length;
+    }
+  }
+  // biggest e1RM movers: first accumulation session vs best, per exercise
+  const firstBest = new Map();
+  for (const week of meso.weeks) {
+    if (week.isDeload) continue;
+    for (const w of week.workouts) {
+      for (const wex of w.exercises) {
+        let best = null;
+        for (const set of wex.sets) {
+          if (!set.done || set.reps == null) continue;
+          const weight = set.weight ?? (wex.bodyweight ? 0 : null);
+          if (weight == null) continue;
+          const score = wex.bodyweight && weight === 0 ? set.reps : e1rm(weight, set.reps);
+          if (!best || score > best) best = score;
+        }
+        if (best == null) continue;
+        const rec = firstBest.get(wex.name);
+        if (!rec) firstBest.set(wex.name, { first: best, best, bw: wex.bodyweight && true });
+        else rec.best = Math.max(rec.best, best);
+      }
+    }
+  }
+  const movers = [...firstBest.entries()]
+    .filter(([, r]) => r.best > r.first && r.first > 0)
+    .map(([name, r]) => ({ name, pct: Math.round(((r.best - r.first) / r.first) * 100), bw: r.bw }))
+    .sort((a, b) => b.pct - a.pct)
+    .slice(0, 3);
+  return { done, skipped, setsLogged, movers };
+}
+
 function renderComplete(meso) {
+  const report = mesoReport(meso);
   app.innerHTML = `
     <div class="card hero" data-testid="meso-complete" style="text-align:center; padding:40px 24px">
       <p class="eyebrow">Mesocycle complete</p>
@@ -1271,6 +1416,19 @@ function renderComplete(meso) {
       <p class="muted" style="max-width:440px; margin:12px auto 0">Deload finished, fatigue paid down. Start the
       next meso a touch below this one's peak volume and let the engine re-earn the climb. Keep what moved well;
       swap anything that argued with your joints.</p>
+      <div class="report-grid" data-testid="meso-report">
+        <div class="report-tile"><b class="num">${report.done}</b><span>sessions</span></div>
+        <div class="report-tile"><b class="num">${report.setsLogged}</b><span>hard sets</span></div>
+        <div class="report-tile"><b class="num">${report.skipped}</b><span>skipped</span></div>
+      </div>
+      ${report.movers.length ? `
+      <div style="max-width:380px; margin:14px auto 0; text-align:left">
+        <p class="eyebrow" style="text-align:center">Biggest movers</p>
+        ${report.movers.map((m) => `<div class="row spread" style="padding:3px 0">
+          <span class="small muted">${esc(m.name)}</span>
+          <b class="small num" style="color:var(--good)">+${m.pct}%${m.bw ? ' reps' : ' e1RM'}</b>
+        </div>`).join('')}
+      </div>` : ''}
       <div class="row" style="justify-content:center; margin-top:22px">
         <a class="btn primary" href="#/new/from/${esc(meso.id)}" data-testid="continue-meso">Start the next block</a>
         <a class="btn" href="#/meso/${esc(meso.id)}/overview">Review results</a>

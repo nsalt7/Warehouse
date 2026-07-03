@@ -327,6 +327,59 @@ test('e1rm math', () => {
   assert.equal(e1rm(null, 5), null);
 });
 
+test('warm-up ramps: compounds only, bar-floored, no near-work-weight steps', () => {
+  const { warmupPlan } = engineNS;
+  const squat = byName('Back Squat');
+  assert.deepEqual(warmupPlan(squat, 225, 'lb'), [
+    { weight: 112.5, reps: 8 }, { weight: 157.5, reps: 4 }, { weight: 192.5, reps: 2 },
+  ]);
+  // light barbell work floors at the empty bar and drops redundant steps
+  assert.deepEqual(warmupPlan(squat, 95, 'lb'), [{ weight: 47.5, reps: 8 }, { weight: 67.5, reps: 4 }, { weight: 80, reps: 2 }]);
+  assert.deepEqual(warmupPlan(byName('Leg Extension'), 100, 'lb'), []); // isolation: none
+  assert.deepEqual(warmupPlan(squat, null, 'lb'), []); // calibration week: none
+});
+
+test('plate math: per-side breakdown, barbell/smith only', () => {
+  const { plateBreakdown } = engineNS;
+  const p = plateBreakdown(225, 'lb', 'barbell');
+  assert.equal(p.bar, 45);
+  assert.deepEqual(p.perSide, [{ plate: 45, count: 2 }]);
+  const q = plateBreakdown(100, 'kg', 'smith');
+  assert.deepEqual(q.perSide, [{ plate: 25, count: 1 }, { plate: 15, count: 1 }]);
+  assert.equal(plateBreakdown(100, 'lb', 'dumbbell'), null);
+  assert.equal(plateBreakdown(30, 'lb', 'barbell').below, true);
+});
+
+test('swapExercise replaces in place: same slot, same set count, fresh calibration', () => {
+  const { swapExercise } = engineNS;
+  const meso = createMesocycle(sampleConfig(5), 'm1');
+  logWeek(meso, 0, () => 100, () => 10); // week 2 exists with targets
+  const before = meso.weeks[1].workouts[0].exercises[1];
+  assert.equal(before.name, 'Back Squat');
+  const setCount = before.sets.length;
+  swapExercise(meso, 0, 1, byName('Front Squat').id);
+  const after = meso.weeks[1].workouts[0].exercises[1];
+  assert.equal(after.name, 'Front Squat');
+  assert.equal(after.sets.length, setCount);
+  assert.equal(after.targetWeight, null);
+  assert.equal(meso.days[0].slots[1].name, 'Front Squat');
+  // environment guard: Bar Dip is calisthenics-only, illegal in a gym meso
+  assert.throws(() => swapExercise(meso, 0, 1, byName('Bar Dip').id), /not available/i);
+});
+
+test('finishers annotate the slot and pending week, and survive week generation', () => {
+  const { setFinisher } = engineNS;
+  const meso = createMesocycle(sampleConfig(5), 'm1');
+  setFinisher(meso, 0, 0, 'myo');
+  assert.equal(meso.days[0].slots[0].finisher, 'myo');
+  assert.equal(meso.weeks[0].workouts[0].exercises[0].finisher, 'myo');
+  logWeek(meso, 0, () => 100, () => 10);
+  assert.equal(meso.weeks[1].workouts[0].exercises[0].finisher, 'myo');
+  setFinisher(meso, 0, 0, null);
+  assert.equal(meso.days[0].slots[0].finisher, null);
+  assert.throws(() => setFinisher(meso, 0, 0, 'giant-set'), /Unknown finisher/);
+});
+
 // ------------------------------------------------- bodyweight progression
 
 function makeBWWex(name, overrides = {}) {
