@@ -209,6 +209,34 @@ try {
   assert(card.includes('E2E Meso') && card.includes('Complete'), 'dashboard lists the completed meso after reload');
   step('state persists across reload (localStorage)');
 
+  // ---- history tab: trend chart, all-time PRs, recent sessions ----
+  await page.click('[data-testid="nav-history"]');
+  await page.waitForSelector('[data-testid="trend-card"]');
+  const trendText = await page.textContent('[data-testid="trend-card"]');
+  assert(trendText.includes('Dumbbell Bench Press') || trendText.includes('Back Squat'), 'trend chart shows a tracked exercise');
+  assert((await page.locator('[data-testid="trend-card"] svg polyline').count()) === 1, 'trend renders a line');
+  const allTime = await page.textContent('[data-testid="alltime-prs"]');
+  assert(allTime.includes('Dumbbell Bench Press') && allTime.includes('E2E Meso'), 'all-time PRs span mesocycles');
+  const recentRows = await page.locator('[data-testid="recent-sessions"] a').count();
+  assert(recentRows >= 8, `recent sessions listed (${recentRows})`);
+  step('history tab: trend chart, all-time bests, recent sessions');
+
+  // ---- next-block continuity: restart just below the last peak ----
+  await page.goto(`${BASE}/#/meso/${(await readState(page)).mesocycles[0].id}`);
+  await page.waitForSelector('[data-testid="continue-meso"]');
+  await page.click('[data-testid="continue-meso"]');
+  await page.waitForSelector('[data-testid="continue-banner"]');
+  await page.click('[data-testid="create-meso"]');
+  await page.waitForSelector('[data-testid="workout-title"]');
+  s = await readState(page);
+  const nextMeso = s.mesocycles[1];
+  assert(nextMeso.name.includes('next block'), 'continuation meso named after its source');
+  // chest peaked at w3chest sets; the next block starts 2 below (floor 1/slot)
+  const nextChest = nextMeso.weeks[0].workouts[0].exercises[0].sets.length;
+  assert(nextChest === Math.max(1, w3chest - 2), `next block restarts below peak (${w3chest} → ${nextChest})`);
+  assert(nextMeso.weeks[0].workouts[0].exercises[0].targetWeight === null, 'new block recalibrates weights');
+  step('next block: program carried over, volume restarts below peak');
+
   // ---- profile conditions swap template movements ----
   await page.click('[data-testid="nav-data"]');
   await page.click('[data-testid="do-profile"]');

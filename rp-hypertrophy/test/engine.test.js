@@ -4,7 +4,7 @@ import {
   rirForWeek, loadIncrement, roundLoad, progressExercise, exercisePerf,
   musclePerf, muscleBrake, volumeDelta, createMesocycle, generateNextWeek,
   finishWorkout, currentPosition, weeklySetsPerMuscle, reactiveDeloadDue,
-  addExercise, removeExercise, e1rm, SESSION_SET_CAP, DELOAD_RIR,
+  addExercise, removeExercise, e1rm, nextMesoConfig, SESSION_SET_CAP, DELOAD_RIR,
 } from '../app/engine.js';
 import {
   EXERCISES, VOLUME_LANDMARKS, exercisesForMuscle, conflictsWith, alternativeFor,
@@ -414,6 +414,48 @@ test('every template only uses exercises available in its environment', () => {
         assert.ok(def.envs.includes(t.environment), `${t.id}: ${def.name} not available in ${t.environment}`);
       }
     }
+  }
+});
+
+test('finishWorkout stamps the finish time when provided', () => {
+  const meso = createMesocycle(sampleConfig(5), 'm1');
+  logAllAndFinish: {
+    const workout = meso.weeks[0].workouts[0];
+    for (const wex of workout.exercises) for (const s of wex.sets) { s.weight = 100; s.reps = 10; s.done = true; }
+    finishWorkout(meso, 0, 0, {}, '2026-07-03T10:00:00.000Z');
+    assert.equal(workout.finishedAt, '2026-07-03T10:00:00.000Z');
+  }
+  assert.equal(meso.weeks[0].workouts[1].finishedAt, undefined);
+});
+
+test('nextMesoConfig: same program, each muscle restarts 2 below its peak', () => {
+  const meso = createMesocycle({ ...sampleConfig(6), unit: 'kg' }, 'm1');
+  logWeek(meso, 0, () => 100, () => 10);
+  logWeek(meso, 1, (wex) => wex.targetWeight + 5, () => 10); // earned +1 everywhere
+  const peakChest = weeklySetsPerMuscle(meso.weeks[2], { fractional: false }).chest;
+
+  const config = nextMesoConfig(meso);
+  assert.equal(config.unit, 'kg');
+  assert.equal(config.environment, 'gym');
+  assert.equal(config.continuedFrom, 'm1');
+  assert.equal(config.days.length, meso.days.length);
+  assert.equal(config.startVolumes.chest, peakChest - 2);
+  assert.ok(config.startVolumes.chest >= 1);
+
+  // and createMesocycle honors the override
+  const next = createMesocycle(config, 'm2');
+  const vol = weeklySetsPerMuscle(next.weeks[0], { fractional: false });
+  assert.equal(vol.chest, peakChest - 2);
+  // fresh calibration: new block, new working weights
+  assert.equal(next.weeks[0].workouts[0].exercises[0].targetWeight, null);
+});
+
+test('nextMesoConfig never floors below one set per slot', () => {
+  const meso = createMesocycle(sampleConfig(4), 'm1');
+  // no logging at all — peaks are just the starting sets
+  const config = nextMesoConfig(meso);
+  for (const [m, sets] of Object.entries(config.startVolumes)) {
+    assert.ok(sets >= 1, `${m}: ${sets}`);
   }
 });
 

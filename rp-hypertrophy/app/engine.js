@@ -343,7 +343,9 @@ export function createMesocycle(config, id) {
   for (const d of days) for (const s of d.slots) slotsPerMuscle[s.muscle] = (slotsPerMuscle[s.muscle] || 0) + 1;
   const perSlot = {};
   for (const [muscle, n] of Object.entries(slotsPerMuscle)) {
-    const start = VOLUME_LANDMARKS[muscle]?.startVolume ?? 8;
+    // config.startVolumes lets a follow-up meso restart just below its last
+    // peak instead of at the generic landmark (see nextMesoConfig).
+    const start = config.startVolumes?.[muscle] ?? VOLUME_LANDMARKS[muscle]?.startVolume ?? 8;
     perSlot[muscle] = Math.max(2, Math.min(5, Math.round(start / n)));
   }
   // Per-session cap at creation too (Remmert 2025): if one day stacks several
@@ -526,11 +528,12 @@ export function generateNextWeek(meso) {
 
 // ------------------------------ workout flow ---------------------------------
 
-export function finishWorkout(meso, weekIndex, dayIndex, feedback) {
+export function finishWorkout(meso, weekIndex, dayIndex, feedback, finishedAt = null) {
   const week = meso.weeks[weekIndex];
   const workout = week?.workouts[dayIndex];
   if (!workout) throw new Error('No such workout');
   workout.status = 'done';
+  workout.finishedAt = finishedAt;
   workout.feedback = feedback || {};
 
   const weekDone = week.workouts.every((w) => w.status === 'done');
@@ -562,4 +565,36 @@ export function currentPosition(meso) {
 export function e1rm(weight, reps) {
   if (weight == null || reps == null || reps <= 0) return null;
   return Math.round(weight * (1 + reps / 30));
+}
+
+// ------------------------- next-meso continuity ------------------------------
+
+// Builder config for the block after a finished meso. The program (including
+// any variation swaps the engine made) carries over, and each muscle restarts
+// at max(slot count, its peak accumulation volume - 2 sets) rather than the
+// generic landmark: resume below the fatigued peak and re-earn the climb
+// (resensitization logic per the deload literature — Bell 2023/2024; fatigue
+// rationale from Pelland 2025; the -2 offset is convention).
+export function nextMesoConfig(meso) {
+  const peak = {};
+  for (const week of meso.weeks) {
+    if (week.isDeload) continue;
+    const vol = weeklySetsPerMuscle(week, { fractional: false });
+    for (const [m, sets] of Object.entries(vol)) peak[m] = Math.max(peak[m] || 0, sets);
+  }
+  const slotsPerMuscle = {};
+  for (const d of meso.days) for (const s of d.slots) slotsPerMuscle[s.muscle] = (slotsPerMuscle[s.muscle] || 0) + 1;
+  const startVolumes = {};
+  for (const [m, sets] of Object.entries(peak)) {
+    startVolumes[m] = Math.max(slotsPerMuscle[m] ?? 1, sets - 2);
+  }
+  return {
+    name: `${meso.name} — next block`,
+    weeksTotal: meso.weeksTotal >= 5 ? meso.weeksTotal : 5,
+    unit: meso.unit,
+    environment: meso.environment,
+    days: meso.days.map((d) => ({ name: d.name, slots: d.slots.map((s) => ({ exerciseId: s.exerciseId })) })),
+    startVolumes,
+    continuedFrom: meso.id,
+  };
 }

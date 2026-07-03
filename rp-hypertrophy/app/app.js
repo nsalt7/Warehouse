@@ -3,7 +3,7 @@
 
 import {
   createMesocycle, finishWorkout, currentPosition, weeklySetsPerMuscle,
-  addExercise, removeExercise, e1rm,
+  addExercise, removeExercise, e1rm, nextMesoConfig,
   SORENESS, WORKLOAD, PUMP, JOINT_PAIN, REST_SECONDS,
 } from './engine.js';
 import {
@@ -122,15 +122,27 @@ function stopRest() {
 
 // ------------------------------- router -------------------------------------
 
+function markActiveTab() {
+  const hash = location.hash || '#/';
+  const tab = hash.startsWith('#/history') ? 'nav-history' : hash.startsWith('#/new') ? 'nav-new' : 'nav-home';
+  document.querySelectorAll('.tabbar a').forEach((a) => {
+    a.classList.toggle('active', a.dataset.testid === tab);
+  });
+}
+
 function route() {
   stopRest();
   modalRoot.innerHTML = '';
+  markActiveTab();
   if (!state.settings.onboarded) return renderOnboarding();
   const hash = location.hash || '#/';
   const mWorkout = hash.match(/^#\/meso\/([^/]+)\/w\/(\d+)\/(\d+)$/);
   const mOverview = hash.match(/^#\/meso\/([^/]+)\/overview$/);
   const mMeso = hash.match(/^#\/meso\/([^/]+)$/);
+  const mFrom = hash.match(/^#\/new\/from\/([^/]+)$/);
   if (hash === '#/new') return renderBuilder();
+  if (mFrom) return renderBuilder(mFrom[1]);
+  if (hash === '#/history') return renderHistory();
   if (mOverview) return withMeso(mOverview[1], (m) => renderOverview(m));
   if (mWorkout) return withMeso(mWorkout[1], (m) => renderWorkout(m, Number(mWorkout[2]), Number(mWorkout[3])));
   if (mMeso) {
@@ -330,15 +342,19 @@ function exOptionLabel(exercise) {
   return parts.join(' ');
 }
 
-function renderBuilder() {
-  const draft = {
-    name: '',
-    weeksTotal: 5,
-    unit: state.settings.unit || 'lb',
-    environment: profile().environment || 'gym',
-    days: [{ name: 'Day 1', slots: [] }],
-    templateId: null,
-  };
+function renderBuilder(fromMesoId = null) {
+  const source = fromMesoId ? getMeso(fromMesoId) : null;
+  const draft = source
+    ? { ...nextMesoConfig(source), templateId: null }
+    : {
+        name: '',
+        weeksTotal: 5,
+        unit: state.settings.unit || 'lb',
+        environment: profile().environment || 'gym',
+        days: [{ name: 'Day 1', slots: [] }],
+        startVolumes: null,
+        templateId: null,
+      };
 
   function invalidDay() {
     return draft.days.findIndex((d) => d.slots.length === 0);
@@ -356,6 +372,9 @@ function renderBuilder() {
           </div>
         </div>
         <p class="faint small" style="margin:8px 0 0">${esc(ENVIRONMENTS.find((e) => e.id === draft.environment)?.blurb || '')}</p>
+        ${source ? `<div class="banner info" data-testid="continue-banner"><span><strong>Continuing from “${esc(source.name)}”.</strong>
+          Same program, including any variation upgrades. Each muscle restarts just below its last peak volume —
+          resume under the fatigue ceiling, then re-earn the climb.</span></div>` : ''}
       </div>
 
       <div class="section" style="margin-top:6px">
@@ -464,6 +483,8 @@ function renderBuilder() {
       draft.templateId = t.id;
       draft.name = draft.name || t.name;
       draft.weeksTotal = t.weeksTotal;
+      draft.startVolumes = null; // a fresh template starts at the landmarks
+      draft.continuedFrom = null;
       // Auto-swap movements that clash with the user's profile.
       let swapped = 0;
       draft.days = t.days.map((d) => ({
@@ -814,7 +835,7 @@ function openFeedback(meso, weekIndex, dayIndex, workout) {
   }));
   document.getElementById('fb-cancel').addEventListener('click', () => { modalRoot.innerHTML = ''; });
   submitBtn.addEventListener('click', () => {
-    const result = finishWorkout(meso, weekIndex, dayIndex, answers);
+    const result = finishWorkout(meso, weekIndex, dayIndex, answers, new Date().toISOString());
     persist();
     modalRoot.innerHTML = '';
     if (result.mesoComplete) toast('Mesocycle complete.');
@@ -968,6 +989,165 @@ function renderOverview(meso) {
   });
 }
 
+// ------------------------------ history --------------------------------------
+
+// Every finished workout across all mesocycles, in training order.
+function allSessions() {
+  const out = [];
+  for (const meso of state.mesocycles) {
+    for (const week of meso.weeks) {
+      for (const workout of week.workouts) {
+        if (workout.status === 'done') out.push({ meso, week, workout });
+      }
+    }
+  }
+  return out;
+}
+
+function setScore(wex, s) {
+  if (!s.done || s.reps == null) return null;
+  const weight = s.weight ?? (wex.bodyweight ? 0 : null);
+  if (weight == null) return null;
+  return wex.bodyweight && weight === 0
+    ? { value: s.reps, bw: true, weight: 0, reps: s.reps }
+    : { value: e1rm(weight, s.reps), bw: false, weight, reps: s.reps };
+}
+
+// Best score per session for one exercise, deloads excluded (trend, not slog).
+function exerciseSeries(name) {
+  const points = [];
+  for (const { meso, week, workout } of allSessions()) {
+    if (week.isDeload) continue;
+    for (const wex of workout.exercises) {
+      if (wex.name !== name) continue;
+      let best = null;
+      for (const s of wex.sets) {
+        const sc = setScore(wex, s);
+        if (sc && (!best || sc.value > best.value)) best = sc;
+      }
+      if (best) points.push({ ...best, label: `${esc(meso.name)} · W${week.index + 1}`, short: `W${week.index + 1}` });
+    }
+  }
+  return points;
+}
+
+function trendChart(points, unit) {
+  const W = 560, H = 170, L = 42, R = 12, T = 14, B = 26;
+  const vals = points.map((p) => p.value);
+  const lo = Math.min(...vals), hi = Math.max(...vals);
+  const pad = Math.max(1, (hi - lo) * 0.15);
+  const yMin = Math.max(0, lo - pad), yMax = hi + pad;
+  const x = (i) => L + (points.length === 1 ? (W - L - R) / 2 : (i / (points.length - 1)) * (W - L - R));
+  const y = (v) => T + (1 - (v - yMin) / (yMax - yMin)) * (H - T - B);
+  const line = points.map((p, i) => `${x(i).toFixed(1)},${y(p.value).toFixed(1)}`).join(' ');
+  const suffix = points[0]?.bw ? ' reps' : ` ${unit}`;
+  return `
+    <svg viewBox="0 0 ${W} ${H}" style="width:100%; height:auto" role="img" aria-label="Progress trend">
+      <line x1="${L}" y1="${y(lo)}" x2="${W - R}" y2="${y(lo)}" stroke="var(--line)" stroke-width="1"/>
+      <line x1="${L}" y1="${y(hi)}" x2="${W - R}" y2="${y(hi)}" stroke="var(--line)" stroke-width="1"/>
+      <text x="${L - 6}" y="${y(lo) + 4}" text-anchor="end" font-size="11" fill="var(--ink-3)">${lo}</text>
+      <text x="${L - 6}" y="${y(hi) + 4}" text-anchor="end" font-size="11" fill="var(--ink-3)">${hi}</text>
+      <polyline points="${line}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+      ${points.map((p, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="3.5" fill="var(--accent)" stroke="var(--card)" stroke-width="1.5"><title>${p.label}: ${p.bw ? '' : `${fmtW(p.weight)} ${unit} × `}${p.reps}${p.bw ? ' reps' : ''} → ${p.value}${suffix}</title></circle>`).join('')}
+      <text x="${L}" y="${H - 8}" font-size="11" fill="var(--ink-3)">${points[0].short}</text>
+      <text x="${W - R}" y="${H - 8}" text-anchor="end" font-size="11" fill="var(--ink-3)">${points[points.length - 1].short}</text>
+    </svg>`;
+}
+
+function renderHistory(selectedName = null) {
+  const sessions = allSessions();
+  if (sessions.length === 0) {
+    app.innerHTML = `
+      <div class="page-head"><h1>History</h1></div>
+      <div class="card" data-testid="history-empty" style="text-align:center; padding:36px 20px">
+        <p class="muted" style="margin:0">Nothing logged yet. Your best sets and progress
+        charts appear here after your first finished workout.</p>
+      </div>`;
+    return;
+  }
+
+  // exercises with enough sessions to chart
+  const counts = new Map();
+  for (const { week, workout } of sessions) {
+    if (week.isDeload) continue;
+    for (const wex of workout.exercises) {
+      if (wex.sets.some((s) => s.done && s.reps != null)) counts.set(wex.name, (counts.get(wex.name) || 0) + 1);
+    }
+  }
+  const chartable = [...counts.entries()].filter(([, n]) => n >= 2).map(([n]) => n).sort();
+  const selected = chartable.includes(selectedName) ? selectedName : chartable[0];
+  const unit = state.mesocycles[state.mesocycles.length - 1]?.unit ?? 'lb';
+  const series = selected ? exerciseSeries(selected) : [];
+
+  // all-time best set per exercise
+  const best = new Map();
+  for (const { meso, week, workout } of sessions) {
+    if (week.isDeload) continue;
+    for (const wex of workout.exercises) {
+      for (const s of wex.sets) {
+        const sc = setScore(wex, s);
+        if (!sc) continue;
+        const prev = best.get(wex.name);
+        if (!prev || sc.value > prev.value) best.set(wex.name, { ...sc, mesoName: meso.name, week: week.index + 1 });
+      }
+    }
+  }
+  const prs = [...best.entries()].sort((a, b) => b[1].value - a[1].value);
+  const recent = sessions.slice(-12).reverse();
+
+  app.innerHTML = `
+    <div class="page-head"><h1>History</h1>
+      <p class="muted small" style="margin:6px 0 0">${sessions.length} sessions across ${state.mesocycles.length} ${state.mesocycles.length === 1 ? 'mesocycle' : 'mesocycles'}.</p>
+    </div>
+
+    ${selected ? `
+    <div class="section" style="margin-top:10px">
+      <h2>Progress</h2>
+      <div class="card" data-testid="trend-card">
+        <div class="row" style="margin-bottom:8px">
+          <select class="field grow" id="trend-pick" data-testid="trend-pick" style="max-width:280px">
+            ${chartable.map((n) => `<option ${n === selected ? 'selected' : ''}>${esc(n)}</option>`).join('')}
+          </select>
+        </div>
+        ${trendChart(series, unit)}
+        <p class="faint small" style="margin:6px 0 0">Best set per session — ${series[0]?.bw ? 'reps (bodyweight)' : 'estimated 1RM (Epley)'}. Deload weeks excluded.</p>
+      </div>
+    </div>` : ''}
+
+    <div class="section">
+      <h2>All-time best sets</h2>
+      <div class="card scroll-x">
+        <table class="data-table" data-testid="alltime-prs">
+          <tr><th>Exercise</th><th class="r">Best set</th><th class="r">Score</th><th class="r">Meso</th></tr>
+          ${prs.slice(0, 15).map(([name, p]) => `<tr>
+            <td>${esc(name)}</td>
+            <td class="r">${p.bw ? `BW × ${p.reps}` : `${fmtW(p.weight)} ${unit} × ${p.reps}`}</td>
+            <td class="r"><b>${p.value}</b>${p.bw ? ' reps' : ''}</td>
+            <td class="r">${esc(p.mesoName)} · W${p.week}</td>
+          </tr>`).join('')}
+        </table>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>Recent sessions</h2>
+      <div class="card" style="padding:6px 16px" data-testid="recent-sessions">
+        ${recent.map(({ meso, week, workout }) => `
+          <a class="slot-row" href="#/meso/${meso.id}/w/${week.index}/${workout.dayIndex}">
+            <div class="grow">
+              <b class="small">${esc(workout.name)}</b>
+              <div class="faint small">${esc(meso.name)} · Week ${week.index + 1}${week.isDeload ? ' · deload' : ''}</div>
+            </div>
+            <span class="faint small num">${workout.finishedAt ? new Date(workout.finishedAt).toLocaleDateString() : ''}</span>
+            <span class="faint">›</span>
+          </a>`).join('')}
+      </div>
+    </div>
+  `;
+
+  document.getElementById('trend-pick')?.addEventListener('change', (e) => renderHistory(e.target.value));
+}
+
 // ------------------------------ complete -------------------------------------
 
 function renderComplete(meso) {
@@ -979,7 +1159,7 @@ function renderComplete(meso) {
       next meso a touch below this one's peak volume and let the engine re-earn the climb. Keep what moved well;
       swap anything that argued with your joints.</p>
       <div class="row" style="justify-content:center; margin-top:22px">
-        <a class="btn primary" href="#/new">Plan the next mesocycle</a>
+        <a class="btn primary" href="#/new/from/${meso.id}" data-testid="continue-meso">Start the next block</a>
         <a class="btn" href="#/meso/${meso.id}/overview">Review results</a>
       </div>
     </div>`;
