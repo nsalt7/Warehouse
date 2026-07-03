@@ -300,6 +300,27 @@ select.field { appearance: none; padding-right: 30px; background-image: url("dat
 .data-table td.r, .data-table th.r { text-align: right; }
 .scroll-x { overflow-x: auto; }
 
+/* ---------- onboarding / profile ---------- */
+.ob-block { margin-top: 20px; }
+.ob-label { font-weight: 650; font-size: 14.5px; margin-bottom: 8px; }
+.ob-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+.ob-opt {
+  text-align: left; padding: 12px 13px; border-radius: var(--radius-sm);
+  background: var(--surface-2); border: 1px solid var(--hairline);
+  display: flex; flex-direction: column; gap: 3px; transition: border-color 0.12s ease;
+}
+.ob-opt span { font-size: 12px; color: var(--ink-3); line-height: 1.4; }
+.ob-opt:hover { border-color: var(--hairline-strong); }
+.ob-opt.on { border-color: var(--accent); background: var(--accent-soft); }
+.ob-opt.on b { color: var(--accent-ink); }
+.ob-conditions { display: flex; flex-wrap: wrap; gap: 8px; }
+.ob-cond {
+  padding: 7px 14px; border-radius: 99px; font-size: 13px; font-weight: 600;
+  background: var(--surface-2); border: 1px solid var(--hairline); color: var(--ink-2);
+}
+.ob-cond:hover { border-color: var(--hairline-strong); color: var(--ink); }
+.ob-cond.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+
 /* ---------- toast ---------- */
 .toast {
   position: fixed; top: 66px; left: 50%; transform: translateX(-50%) translateY(-6px);

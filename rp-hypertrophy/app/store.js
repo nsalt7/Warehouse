@@ -5,7 +5,12 @@
 
 const KEY = 'hypertrophy-coach:v1';
 
-const EMPTY = () => ({ version: 1, nextId: 1, settings: { unit: 'lb' }, mesocycles: [] });
+const EMPTY = () => ({
+  version: 2,
+  nextId: 1,
+  settings: { unit: 'lb', onboarded: false, profile: { environment: 'gym', conditions: [] } },
+  mesocycles: [],
+});
 
 export function loadState() {
   try {
@@ -13,6 +18,9 @@ export function loadState() {
     if (!raw) return EMPTY();
     const state = JSON.parse(raw);
     if (!state || typeof state !== 'object' || !Array.isArray(state.mesocycles)) return EMPTY();
+    // Backfill fields added since the save was written.
+    state.settings = { ...EMPTY().settings, ...state.settings };
+    state.settings.profile = { ...EMPTY().settings.profile, ...state.settings.profile };
     return state;
   } catch {
     return EMPTY();

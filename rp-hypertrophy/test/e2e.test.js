@@ -37,10 +37,13 @@ try {
   const page = await browser.newPage({ viewport: { width: 1000, height: 800 } });
   page.on('pageerror', (e) => { throw e; });
 
-  // ---- empty state ----
+  // ---- onboarding ----
   await page.goto(BASE);
+  await page.waitForSelector('[data-testid="onboarding"]');
+  await page.click('[data-testid="ob-env-gym"]');
+  await page.click('[data-testid="ob-done"]');
   await page.waitForSelector('[data-testid="empty-state"]');
-  step('dashboard shows empty state');
+  step('onboarding: environment chosen, lands on empty dashboard');
 
   // ---- build a custom 4-week meso: 2 days, 1 exercise each ----
   await page.click('[data-testid="new-meso"]');
@@ -103,6 +106,27 @@ try {
   await page.click('[data-testid="add-set-0"]');
   await page.waitForFunction((n) => document.querySelectorAll('[data-testid^="weight-0-"]').length === n + 1, before);
   step('manually added a set mid-workout');
+
+  // ---- mid-meso program editing ----
+  await page.click('[data-testid="edit-program"]');
+  await page.waitForSelector('[data-testid="program-editor"]');
+  await page.selectOption('[data-testid="pe-muscle"]', 'biceps');
+  await page.selectOption('[data-testid="pe-ex"]', { label: 'Incline Dumbbell Curl · stretch' });
+  await page.click('[data-testid="pe-add"]');
+  await page.waitForSelector('[data-testid="rm-ex-1"]');
+  await page.click('[data-testid="pe-done"]');
+  await page.waitForFunction(() => document.querySelectorAll('[data-testid="exercise-card"]').length === 2);
+  let midState = await readState(page);
+  const addedWex = midState.mesocycles[0].weeks[0].workouts[0].exercises[1];
+  assert(addedWex.name === 'Incline Dumbbell Curl' && addedWex.sets.length === 2, 'added exercise enters at 2 sets');
+  step('program editor: exercise added mid-meso at 2 calibration sets');
+
+  await page.click('[data-testid="edit-program"]');
+  await page.waitForSelector('[data-testid="program-editor"]');
+  await page.click('[data-testid="rm-ex-1"]');
+  await page.click('[data-testid="pe-done"]');
+  await page.waitForFunction(() => document.querySelectorAll('[data-testid="exercise-card"]').length === 1);
+  step('program editor: exercise removed again');
 
   await logWorkout({ weight: 100, reps: 10 });   // day 1
   await logWorkout({ weight: 100, reps: 10 });   // day 2 → week 2 generated
@@ -184,6 +208,30 @@ try {
   const card = await page.textContent('[data-testid="meso-card"]');
   assert(card.includes('E2E Meso') && card.includes('Complete'), 'dashboard lists the completed meso after reload');
   step('state persists across reload (localStorage)');
+
+  // ---- profile conditions swap template movements ----
+  await page.click('[data-testid="nav-data"]');
+  await page.click('[data-testid="do-profile"]');
+  await page.click('[data-testid="ob-cond-knee"]');
+  await page.click('[data-testid="ob-done"]');
+  await page.goto(`${BASE}/#/new`);
+  await page.waitForSelector('[data-testid="template-full-body-3x"]');
+  await page.click('[data-testid="template-full-body-3x"]');
+  await page.waitForSelector('[data-testid="day-editor"]');
+  const daysText = await page.textContent('#days');
+  assert(!daysText.includes('Back Squat'), 'knee-stressing Back Squat was swapped out');
+  assert(daysText.includes('Leg Press'), 'a knee-friendly alternative took its place');
+  step('flagged knee issues auto-swap conflicting template movements');
+
+  // ---- calisthenics environment filters templates and exercises ----
+  await page.click('[data-testid="env-calisthenics"]');
+  await page.waitForSelector('[data-testid="template-bar-park-full-body-3x"]');
+  assert((await page.locator('[data-testid="template-full-body-3x"]').count()) === 0, 'gym templates hidden at the bar park');
+  await page.selectOption('[data-testid="muscle-pick-0"]', 'chest');
+  const chestOptions = await page.$$eval('[data-testid="ex-pick-0"] option', (els) => els.map((o) => o.textContent));
+  assert(chestOptions.some((o) => o.includes('Push-Up')), 'bodyweight chest work offered');
+  assert(!chestOptions.some((o) => o.includes('Barbell Bench Press')), 'no barbells at the bar park');
+  step('calisthenics mode: templates and exercise picker filtered correctly');
 
   await browser.close();
   console.log('\nE2E: all steps passed ✅');

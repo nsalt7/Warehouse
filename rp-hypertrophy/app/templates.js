@@ -26,6 +26,7 @@ export const TEMPLATES = [
     name: 'First Mesocycle — Full Body 2x',
     level: 'Beginner',
     description: 'Two short full-body days built around the six fundamental movement patterns. Low starting volume so your first meso teaches you the feedback loop without wrecking you.',
+    environment: 'gym',
     weeksTotal: 5,
     days: [
       day('Full Body A', 'Back Squat', 'Barbell Bench Press', 'Seated Cable Row', 'Dumbbell Lateral Raise', 'Cable Crunch'),
@@ -37,6 +38,7 @@ export const TEMPLATES = [
     name: 'Full Body 3x',
     level: 'Beginner–Intermediate',
     description: 'Three full-body days, every big muscle 2–3x per week. The highest-bang-for-hour layout there is; ideal if you can train Mon/Wed/Fri.',
+    environment: 'gym',
     weeksTotal: 5,
     days: [
       day('Full Body A', 'Back Squat', 'Barbell Bench Press', 'Barbell Row', 'Dumbbell Lateral Raise', 'Cable Crunch'),
@@ -49,6 +51,7 @@ export const TEMPLATES = [
     name: 'Upper / Lower 4x',
     level: 'Intermediate',
     description: 'The workhorse split. Every muscle twice a week, sessions about an hour, easy to schedule around life. If in doubt, run this.',
+    environment: 'gym',
     weeksTotal: 5,
     days: [
       day('Upper 1', 'Barbell Bench Press', 'Barbell Row', 'Overhead Press', 'EZ-Bar Curl', 'Cable Pushdown (Bar)'),
@@ -62,6 +65,7 @@ export const TEMPLATES = [
     name: 'Push / Pull / Legs 3x',
     level: 'Intermediate',
     description: 'Classic PPL for a three-day week. Each muscle gets one focused, higher-volume session — great when your schedule caps you at three gym trips.',
+    environment: 'gym',
     weeksTotal: 5,
     days: [
       day('Push', 'Barbell Bench Press', 'Overhead Press', 'Cable Fly (Mid)', 'Dumbbell Lateral Raise', 'Cable Pushdown (Rope)'),
@@ -74,6 +78,7 @@ export const TEMPLATES = [
     name: 'Upper / Lower + Full 5x',
     level: 'Intermediate–Advanced',
     description: 'Upper/Lower twice through plus a Friday full-body top-up. The extra day is where the engine parks added sets as your volume climbs mid-meso.',
+    environment: 'gym',
     weeksTotal: 5,
     days: [
       day('Upper 1', 'Barbell Bench Press', 'Barbell Row', 'Dumbbell Lateral Raise', 'EZ-Bar Curl'),
@@ -88,6 +93,7 @@ export const TEMPLATES = [
     name: 'Push / Pull / Legs 6x',
     level: 'Advanced',
     description: 'High-frequency PPL: every muscle twice a week with room to push volume high. Only take this on if you can genuinely train six days and sleep like it matters.',
+    environment: 'gym',
     weeksTotal: 6,
     days: [
       day('Push 1', 'Barbell Bench Press', 'Overhead Press', 'Cable Fly (Mid)', 'Cable Pushdown (Bar)'),
@@ -103,6 +109,7 @@ export const TEMPLATES = [
     name: 'Arm Specialization 4x',
     level: 'Advanced',
     description: 'Biceps and triceps 3x/week at high volume while legs and torso tick over at maintenance. Run for one meso, then return to balanced training.',
+    environment: 'gym',
     weeksTotal: 5,
     days: [
       day('Arms + Chest', 'Barbell Bench Press', 'EZ-Bar Curl', 'Cable Pushdown (Bar)', 'Incline Dumbbell Curl', 'Overhead Cable Extension'),
@@ -116,6 +123,7 @@ export const TEMPLATES = [
     name: 'Chest & Back Specialization 4x',
     level: 'Advanced',
     description: 'Torso-focused meso: chest and back trained hard twice each with supersets in spirit, arms and legs at maintenance. For when the mirror says "more torso".',
+    environment: 'gym',
     weeksTotal: 5,
     days: [
       day('Chest + Back 1', 'Barbell Bench Press', 'Barbell Row', 'Incline Dumbbell Press', 'Lat Pulldown'),
@@ -129,6 +137,7 @@ export const TEMPLATES = [
     name: 'Glute & Hamstring Emphasis 4x',
     level: 'Intermediate',
     description: 'Lower-body-biased split with glutes and hamstrings leading every lower day and upper body held at a productive minimum.',
+    environment: 'gym',
     weeksTotal: 5,
     days: [
       day('Glutes + Hams 1', 'Barbell Hip Thrust', 'Bulgarian Split Squat', 'Seated Leg Curl', 'Abduction Machine'),
@@ -142,10 +151,67 @@ export const TEMPLATES = [
     name: 'Minimalist 2x — Busy Season',
     level: 'All levels',
     description: 'Two ~45-minute sessions that keep everything growing (or at worst, keep everything you have). For deadline weeks, new parents, and travel-heavy months.',
+    environment: 'gym',
     weeksTotal: 4,
     days: [
       day('Session A', 'Hack Squat', 'Dumbbell Bench Press', 'Lat Pulldown', 'Seated Leg Curl'),
       day('Session B', 'Leg Press', 'Overhead Press', 'Chest-Supported Row', 'Dumbbell Lateral Raise'),
+    ],
+  },
+  // ----- calisthenics (bar park) -----
+  {
+    id: 'bar-park-full-body-3x',
+    name: 'Bar Park Full Body 3x',
+    level: 'Beginner–Intermediate',
+    description: 'Three sessions at the bars: pull, push, squat every visit. When you top a rep range, the engine advances you to the harder variation instead of adding plates.',
+    environment: 'calisthenics',
+    weeksTotal: 5,
+    days: [
+      day('Bars A', 'Pull-Up', 'Push-Up', 'Split Squat (Bodyweight)', 'Glute Bridge', 'V-Up'),
+      day('Bars B', 'Bar Dip', 'Inverted Row', 'Bodyweight Squat', 'Sliding Leg Curl', 'Hanging Leg Raise'),
+      day('Bars C', 'Chin-Up', 'Deficit Push-Up', 'Single-Leg Hip Hinge', 'Single-Leg Calf Raise (Step)', 'Low-Bar Bodyweight Curl'),
+    ],
+  },
+  {
+    id: 'street-upper-lower-4x',
+    name: 'Street Upper / Lower 4x',
+    level: 'Intermediate',
+    description: 'The classic split, no plates required. Weighted-vest ready: log added weight on any set and the engine switches that movement to load progression.',
+    environment: 'calisthenics',
+    weeksTotal: 5,
+    days: [
+      day('Upper 1', 'Pull-Up', 'Bar Dip', 'Inverted Row', 'Pike Push-Up'),
+      day('Lower 1', 'Split Squat (Bodyweight)', 'Sliding Leg Curl', 'Glute Bridge', 'Single-Leg Calf Raise (Step)'),
+      day('Upper 2', 'Chin-Up', 'Deficit Push-Up', 'Feet-Elevated Inverted Row', 'Low-Bar Bodyweight Curl', 'Hanging Leg Raise'),
+      day('Lower 2', 'Pistol Squat (Assisted)', 'Nordic Curl', 'Single-Leg Glute Bridge', 'Single-Leg Hip Hinge'),
+    ],
+  },
+  // ----- home (no equipment) -----
+  {
+    id: 'home-full-body-3x',
+    name: 'No-Equipment Full Body 3x',
+    level: 'Beginner–Intermediate',
+    description: 'Floor, wall, a doorframe, and a sturdy chair. Every muscle covered three times a week; progression runs through harder variations and rep climbs.',
+    environment: 'home',
+    weeksTotal: 5,
+    days: [
+      day('Home A', 'Bodyweight Squat', 'Push-Up', 'Towel Doorframe Row', 'Glute Bridge', 'Reverse Crunch'),
+      day('Home B', 'Split Squat (Bodyweight)', 'Pike Push-Up', 'Inverted Row', 'Sliding Leg Curl', 'V-Up'),
+      day('Home C', 'Step-Up (High Box)', 'Deficit Push-Up', 'Towel Doorframe Row', 'Single-Leg Hip Hinge', 'Single-Leg Calf Raise (Step)'),
+    ],
+  },
+  {
+    id: 'home-upper-lower-4x',
+    name: 'Living-Room Upper / Lower 4x',
+    level: 'Intermediate',
+    description: 'A four-day split that fits between the couch and the wall. Push variations carry chest and shoulders; hinges and bridges keep the posterior chain honest.',
+    environment: 'home',
+    weeksTotal: 5,
+    days: [
+      day('Upper 1', 'Push-Up', 'Towel Doorframe Row', 'Pike Push-Up', 'Diamond Push-Up'),
+      day('Lower 1', 'Split Squat (Bodyweight)', 'Sliding Leg Curl', 'Glute Bridge', 'Single-Leg Calf Raise (Step)'),
+      day('Upper 2', 'Deficit Push-Up', 'Inverted Row', 'Prone Y-Raise', 'Bench Dip'),
+      day('Lower 2', 'Step-Up (High Box)', 'Single-Leg Hip Hinge', 'Single-Leg Glute Bridge', 'Reverse Crunch'),
     ],
   },
 ];

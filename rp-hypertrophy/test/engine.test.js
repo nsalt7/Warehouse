@@ -4,9 +4,11 @@ import {
   rirForWeek, loadIncrement, roundLoad, progressExercise, exercisePerf,
   musclePerf, muscleBrake, volumeDelta, createMesocycle, generateNextWeek,
   finishWorkout, currentPosition, weeklySetsPerMuscle, reactiveDeloadDue,
-  e1rm, SESSION_SET_CAP, DELOAD_RIR,
+  addExercise, removeExercise, e1rm, SESSION_SET_CAP, DELOAD_RIR,
 } from '../app/engine.js';
-import { EXERCISES, VOLUME_LANDMARKS, exercisesForMuscle } from '../app/exercises.js';
+import {
+  EXERCISES, VOLUME_LANDMARKS, exercisesForMuscle, conflictsWith, alternativeFor,
+} from '../app/exercises.js';
 import { TEMPLATES } from '../app/templates.js';
 
 const byName = (name) => EXERCISES.find((e) => e.name === name);
@@ -284,4 +286,141 @@ test('lengthened-biased exercises rank first within a muscle', () => {
 test('e1rm math', () => {
   assert.equal(e1rm(200, 10), 267);
   assert.equal(e1rm(null, 5), null);
+});
+
+// ------------------------------------------------- bodyweight progression
+
+function makeBWWex(name, overrides = {}) {
+  const def = byName(name);
+  return {
+    exerciseId: def.id, muscle: def.muscle, name: def.name, type: def.type,
+    region: def.region, repRange: def.repRange, secondary: def.secondary,
+    bodyweight: true, targetWeight: null, missStreak: 0, prevSets: null, jointPain: 0,
+    sets: [], ...overrides,
+  };
+}
+
+test('bodyweight: topping the window advances to the harder variation', () => {
+  const pushUp = makeBWWex('Push-Up', {
+    sets: [{ weight: null, reps: 15, done: true }, { weight: null, reps: 15, done: true }],
+  });
+  const p = progressExercise(pushUp, 'lb', 'calisthenics');
+  assert.equal(p.swapTo, byName('Deficit Push-Up').id);
+  assert.deepEqual(p.repRange, byName('Deficit Push-Up').repRange);
+});
+
+test('bodyweight: end of the chain extends the rep window instead (cap 30)', () => {
+  const archer = makeBWWex('Archer Push-Up', {
+    sets: [{ weight: null, reps: 12, done: true }, { weight: null, reps: 12, done: true }],
+  });
+  const p = progressExercise(archer, 'lb', 'home');
+  assert.equal(p.swapTo, undefined);
+  assert.deepEqual(p.repRange, [8, 14]); // [6,12] shifted +2
+});
+
+test('bodyweight: chain does not advance into an unavailable environment', () => {
+  // Elevated Pike Push-Up → Wall Handstand Push-Up is home/calisthenics only,
+  // so it should still advance there but a gym-only variation never would.
+  const pullUp = makeBWWex('Pull-Up', {
+    sets: [{ weight: null, reps: 10, done: true }],
+  });
+  // Archer Pull-Up is calisthenics-only: advancing is fine at the bar park...
+  assert.equal(progressExercise(pullUp, 'lb', 'calisthenics').swapTo, byName('Archer Pull-Up').id);
+  // ...but in the gym the engine extends reps instead of prescribing it.
+  const inGym = progressExercise(pullUp, 'lb', 'gym');
+  assert.equal(inGym.swapTo, undefined);
+  assert.deepEqual(inGym.repRange, [7, 12]);
+});
+
+test('bodyweight: loading every set (vest) graduates to weighted progression', () => {
+  const dips = makeBWWex('Bar Dip', {
+    sets: [{ weight: 25, reps: 10, done: true }, { weight: 25, reps: 9, done: true }],
+  });
+  const p = progressExercise(dips, 'lb', 'calisthenics');
+  assert.equal(p.targetWeight, 25);
+});
+
+test('a calisthenics meso swaps mastered movements at week generation', () => {
+  const meso = createMesocycle({
+    name: 'Bars', weeksTotal: 4, unit: 'lb', environment: 'calisthenics',
+    days: [{ name: 'Bars', slots: [{ exerciseId: byName('Push-Up').id }, { exerciseId: byName('Pull-Up').id }] }],
+  }, 'm1');
+  assert.equal(meso.environment, 'calisthenics');
+  const w1 = meso.weeks[0];
+  for (const wex of w1.workouts[0].exercises) {
+    for (const s of wex.sets) { s.weight = null; s.reps = wex.repRange[1]; s.done = true; }
+  }
+  finishWorkout(meso, 0, 0, { chest: { soreness: 1, workload: 1, pump: 1 }, back: { soreness: 1, workload: 1, pump: 1 } });
+  const w2 = meso.weeks[1];
+  assert.equal(w2.workouts[0].exercises[0].name, 'Deficit Push-Up');
+  assert.equal(w2.workouts[0].exercises[1].name, 'Archer Pull-Up');
+  assert.equal(w2.notes.length, 2);
+  assert.equal(meso.days[0].slots[0].name, 'Deficit Push-Up'); // program updated too
+});
+
+// ------------------------------------------------- mid-meso program edits
+
+test('addExercise applies to the pending week at 2 sets; removeExercise guards the last slot', () => {
+  const meso = createMesocycle(sampleConfig(5), 'm1');
+  const curl = byName('Dumbbell Curl');
+  addExercise(meso, 0, curl.id);
+  assert.equal(meso.days[0].slots.length, 3);
+  const workout = meso.weeks[0].workouts[0];
+  assert.equal(workout.exercises.length, 3);
+  assert.equal(workout.exercises[2].sets.length, 2);
+  assert.equal(workout.exercises[2].targetWeight, null);
+
+  removeExercise(meso, 0, 2);
+  assert.equal(meso.days[0].slots.length, 2);
+  assert.equal(workout.exercises.length, 2);
+
+  removeExercise(meso, 0, 0);
+  assert.throws(() => removeExercise(meso, 0, 0), /at least one exercise/);
+});
+
+test('week generation survives a mid-meso add: matching is by exercise, not index', () => {
+  const meso = createMesocycle(sampleConfig(5), 'm1');
+  logWeek(meso, 0, () => 100, () => 10);
+  // Insert a new movement mid-meso, then finish week 2 beating week 1.
+  addExercise(meso, 0, byName('Dumbbell Curl').id);
+  logWeek(meso, 1, (wex) => (wex.targetWeight ?? 30) + 5, () => 10);
+  const w3 = meso.weeks[2];
+  // The added exercise is still in the program and calibrated from its logs.
+  const curl = w3.workouts[0].exercises.find((e) => e.name === 'Dumbbell Curl');
+  assert.ok(curl, 'added exercise persists into generated weeks');
+  assert.equal(curl.targetWeight, 35);
+  // The pre-existing exercises still progressed on earned performance.
+  assert.equal(meso.weeks[1].perf.chest, 1);
+});
+
+// ------------------------------------------------- conditions & alternatives
+
+test('conflictsWith and alternativeFor respect flagged conditions', () => {
+  const squat = byName('Back Squat');
+  assert.deepEqual(conflictsWith(squat, ['spine', 'knee']), ['spine', 'knee']);
+  assert.deepEqual(conflictsWith(squat, []), []);
+  const alt = alternativeFor(squat, ['spine'], 'gym');
+  assert.ok(alt, 'an alternative exists');
+  assert.equal(alt.muscle, 'quads');
+  assert.ok(!alt.stress.includes('spine'), `${alt.name} must not stress the spine`);
+  assert.equal(alt.type, 'compound'); // prefers matching movement type
+});
+
+test('every template only uses exercises available in its environment', () => {
+  for (const t of TEMPLATES) {
+    for (const d of t.days) {
+      for (const s of d.slots) {
+        const def = EXERCISES.find((e) => e.id === s.exerciseId);
+        assert.ok(def.envs.includes(t.environment), `${t.id}: ${def.name} not available in ${t.environment}`);
+      }
+    }
+  }
+});
+
+test('environment filtering: home picker never offers gym machinery', () => {
+  for (const m of ['chest', 'back', 'quads', 'hamstrings', 'glutes', 'shoulders']) {
+    const list = exercisesForMuscle(m, 'home');
+    assert.ok(list.length > 0, `${m} has home options`);
+    for (const e of list) assert.equal(e.equipment, 'bodyweight', `${e.name} is equipment-free`);
+  }
 });

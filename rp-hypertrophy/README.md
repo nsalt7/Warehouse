@@ -25,9 +25,20 @@ JSON file you can restore on any machine.
 
 ## Using it
 
-1. **Plan** — pick one of 10 coach-built templates (beginner full-body through
-   6-day PPL and specialization blocks) or build custom days from a ~75-exercise
-   library. Stretch-position exercises are flagged and listed first.
+0. **Onboard** — say where you train (**gym**, **calisthenics** bar park, or
+   **home** with no equipment) and flag anything to train around (lower back,
+   knees, shoulders, elbows/wrists). Templates auto-swap conflicting movements
+   and pickers warn on them. Programming logic, not medical advice.
+1. **Plan** — pick a coach-built template for your environment (14 across the
+   three modes) or build custom days from a ~90-exercise library. Stretch-
+   position exercises are flagged and listed first. In calisthenics/home mode,
+   progression runs through **harder variations** (incline push-up → push-up →
+   deficit → archer …) and rep climbs instead of plates — same engine, same
+   evidence (progressive push-up training matched bench press for strength and
+   thickness; citations in the engine). Log added vest weight on every set of a
+   movement and it switches to load progression.
+   Mid-meso you can **add or remove exercises** from any day (Edit day) —
+   changes apply from the current session onward, history stays intact.
 2. **Week 1 calibrates** — find working weights for the shown rep range at the
    target RIR. The engine adopts what you actually lift.
 3. **Train and check in** — log weight × reps per set (one-tap logging adopts

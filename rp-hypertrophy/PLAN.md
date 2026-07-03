@@ -49,6 +49,21 @@ ECSS/ACSM consensus). So here:
    Remmert 2025); indirect work counts 0.5 sets (Baz-Valle framework).
 6. **Exercise library is stretch-biased**: lengthened-position variants are
    flagged and ranked first (Maeo 2021/2023; Pedrosa 2022; Kassiano 2023).
+7. **Three training environments, one engine.** Gym progresses load;
+   calisthenics (bar park) and home (equipment-free) progress through harder
+   variation chains and rep climbs — legitimate overload (Kotarsky 2018 JSCR;
+   Calatayud 2015 JSCR; Kikuchi & Nakazato 2017; Plotkin 2022; Schoenfeld 2021
+   low-load evidence). Logging external load (vest/belt) on all sets graduates
+   a movement to weighted double progression.
+8. **Profile-aware programming.** Onboarding captures training environment and
+   musculoskeletal constraints (lower back / knee / shoulder / elbow-wrist).
+   Exercises carry stress tags; templates auto-swap conflicts to same-muscle,
+   same-environment alternatives and pickers warn inline. Framed as programming
+   metadata, explicitly not medical advice.
+9. **Mid-meso program edits.** Exercises can be added (enter at 2 calibration
+   sets) or removed per day while a meso runs; week-over-week matching is by
+   exercise identity, not slot position, so history and progression survive
+   edits and variation swaps.
 
 ## Part 3: Architecture (built for the iOS future)
 

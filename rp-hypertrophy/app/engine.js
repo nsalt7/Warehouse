@@ -25,14 +25,24 @@
 //   Sci; Pelland 2025, Sports Med meta-regression — diminishing returns,
 //   negligible marginal benefit approaching ~30 sets/week).
 //
-// All state shapes are plain JSON (documented in PLAN.md); every function here
-// is pure so the whole ruleset is unit-testable and portable to a native app.
+// Bodyweight environments (calisthenics / home) run the same engine. The only
+// difference is the progression lever: instead of adding plates, topping out a
+// rep window advances the movement to its harder variation. That is legitimate
+// overload — progressive push-up training matched bench press for strength and
+// muscle thickness (Kotarsky 2018, JSCR; Kikuchi & Nakazato 2017, J Exerc Sci
+// Fit), effort-matched push-ups matched bench for strength gain (Calatayud
+// 2015, JSCR), rep progression equals load progression at matched effort
+// (Plotkin 2022, PeerJ), and loads down to ~30% 1RM grow muscle when sets end
+// near failure (Schoenfeld 2021, Sports; Lopez 2021, MSSE).
+//
+// All state is plain JSON and every function is pure, so the whole ruleset is
+// unit-testable and ports to a native app unchanged.
 // ============================================================================
 
-import { VOLUME_LANDMARKS, getExercise } from './exercises.js';
+import { VOLUME_LANDMARKS, getExercise, getExerciseByName } from './exercises.js';
 
 // --------------------------- feedback scales --------------------------------
-// Indices matter — the engine's brake logic uses them.
+// Indices matter — the brake logic uses them.
 export const SORENESS = ['Never got sore', 'Healed a while ago', 'Healed just in time', 'Still sore now'];
 export const WORKLOAD = ['Easy', 'Pretty hard', 'Very hard', 'Too much'];
 export const PUMP = ['No pump', 'Decent pump', 'Great pump']; // logged, never programmed from
@@ -46,8 +56,8 @@ export const REST_SECONDS = { compound: 150, isolation: 90 };
 
 export const DELOAD_RIR = 4;
 // Per-session stimulus saturates around ~11 fractional / ~6-8 direct hard sets
-// per muscle (Remmert 2025, SportRxiv; long-rest per-session analyses). Added
-// volume beyond the cap must go to another training day.
+// per muscle (Remmert 2025, SportRxiv per-session analyses). Added volume
+// beyond the cap must go to another training day.
 export const SESSION_SET_CAP = 8;
 
 // --------------------------- RIR prescription -------------------------------
@@ -69,12 +79,11 @@ export function rirForWeek(weekIndex, weeksTotal) {
 }
 
 // --------------------------- load increments --------------------------------
-// Rep-based and load-based progression are equally effective when effort is
-// matched (Plotkin 2022, PeerJ), and hypertrophy is load-independent across
-// ~30-85%+ 1RM near failure (Schoenfeld 2021, Sports; Lopez 2021, MSSE), so we
-// use double progression: add reps inside the window, then the smallest
-// practical load jump. Increment sizes are field convention (~2.5-5% of the
-// working load), capped at 5% so a jump never exits the rep window.
+// Double progression: chase reps inside the window, then take the smallest
+// practical load jump (~2.5-5% of the working load, capped at 5% so a jump
+// never exits the rep window). Rep- and load-progression are equally effective
+// at matched effort (Plotkin 2022, PeerJ); increment sizes are field
+// convention.
 export function loadIncrement(exercise, weight, unit) {
   const kg = unit === 'kg';
   const smallest = kg ? 1.25 : 2.5;
@@ -94,56 +103,83 @@ export function roundLoad(weight, unit) {
 // ------------------------ per-exercise progression --------------------------
 
 function doneSets(wex) {
-  return wex.sets.filter((s) => s.done && s.weight != null && s.reps != null);
+  // Bodyweight sets are valid with no external load logged.
+  return wex.sets.filter((s) => s.done && s.reps != null && (s.weight != null || wex.bodyweight));
 }
 
-function bestSet(sets) {
+function bestSet(wex) {
+  const sets = doneSets(wex);
   if (sets.length === 0) return null;
-  const top = Math.max(...sets.map((s) => s.weight));
-  const reps = Math.max(...sets.filter((s) => s.weight === top).map((s) => s.reps));
+  const w = (s) => s.weight ?? 0;
+  const top = Math.max(...sets.map(w));
+  const reps = Math.max(...sets.filter((s) => w(s) === top).map((s) => s.reps));
   return { weight: top, reps };
 }
 
-// Double progression for one exercise slot, from its previous-week instance.
-// Returns { targetWeight, missStreak, prevSets } for the next week's instance.
-export function progressExercise(prevWex, unit) {
+// Next-week prescription for one exercise from its previous-week instance.
+// Returns { targetWeight, missStreak, prevSets, repRange, swapTo? }.
+export function progressExercise(prevWex, unit, environment = 'gym') {
   const done = doneSets(prevWex);
   const [repLo, repHi] = prevWex.repRange;
-
-  if (done.length === 0) {
-    // Nothing logged — carry state forward unchanged rather than guessing.
-    return { targetWeight: prevWex.targetWeight, missStreak: prevWex.missStreak || 0, prevSets: prevWex.prevSets || null };
-  }
+  const carry = {
+    targetWeight: prevWex.targetWeight,
+    missStreak: prevWex.missStreak || 0,
+    prevSets: prevWex.prevSets || null,
+    repRange: prevWex.repRange,
+  };
+  if (done.length === 0) return carry; // nothing logged — don't guess
   const snapshot = done.map((s) => ({ weight: s.weight, reps: s.reps }));
+  const allSetsDone = done.length >= prevWex.sets.length;
 
+  // ---- bodyweight path: variation chains instead of plates ----
+  if (prevWex.bodyweight && prevWex.targetWeight == null) {
+    const loaded = done.filter((s) => (s.weight ?? 0) > 0);
+    if (loaded.length === done.length && loaded.length > 0) {
+      // User added external load (vest/belt) on every set — graduate to the
+      // standard weighted double progression.
+      return { ...carry, targetWeight: Math.max(...loaded.map((s) => s.weight)), missStreak: 0, prevSets: snapshot };
+    }
+    if (allSetsDone && done.every((s) => s.reps >= repHi)) {
+      const def = getExercise(prevWex.exerciseId);
+      const harder = def?.next ? getExerciseByName(def.next) : null;
+      if (harder && harder.envs.includes(environment)) {
+        // Movement mastered → advance the chain (Kotarsky 2018; Plotkin 2022).
+        return { targetWeight: null, missStreak: 0, prevSets: null, repRange: harder.repRange, swapTo: harder.id };
+      }
+      if (repHi < 30) {
+        // End of the chain: keep earning reps — still growth territory while
+        // sets end near failure (Schoenfeld 2021: effective to ~30 reps).
+        return { ...carry, repRange: [repLo + 2, Math.min(30, repHi + 2)], missStreak: 0, prevSets: snapshot };
+      }
+    }
+    return { ...carry, missStreak: 0, prevSets: snapshot };
+  }
+
+  // ---- weighted path ----
   if (prevWex.targetWeight == null) {
     // Calibration week: adopt the heaviest weight the user actually worked with.
-    return { targetWeight: Math.max(...done.map((s) => s.weight)), missStreak: 0, prevSets: snapshot };
+    return { ...carry, targetWeight: Math.max(...done.map((s) => s.weight)), missStreak: 0, prevSets: snapshot };
   }
-
   const atTarget = done.filter((s) => s.weight >= prevWex.targetWeight);
-  const allSetsDone = done.length >= prevWex.sets.length;
-  // Add-load trigger: top of the rep window on ALL prescribed sets at the
-  // target load (Plotkin 2022 — reps until window top, then smallest jump).
   if (allSetsDone && atTarget.length === done.length && done.every((s) => s.reps >= repHi)) {
     const inc = loadIncrement(prevWex, prevWex.targetWeight, unit);
-    return { targetWeight: roundLoad(prevWex.targetWeight + inc, unit), missStreak: 0, prevSets: snapshot };
+    return { ...carry, targetWeight: roundLoad(prevWex.targetWeight + inc, unit), missStreak: 0, prevSets: snapshot };
   }
-  // Auto-reset: below the window bottom two sessions running → drop the load
-  // 5% and rebuild (APRE-style down-adjustment — Mann 2010, JSCR).
+  // Below the window bottom two sessions running → drop the load 5% and
+  // rebuild (APRE-style down-adjustment — Mann 2010, JSCR).
   const missedBottom = atTarget.length > 0 && Math.min(...atTarget.map((s) => s.reps)) < repLo;
   const missStreak = missedBottom ? (prevWex.missStreak || 0) + 1 : 0;
   if (missStreak >= 2) {
-    return { targetWeight: roundLoad(prevWex.targetWeight * 0.95, unit), missStreak: 0, prevSets: snapshot };
+    return { ...carry, targetWeight: roundLoad(prevWex.targetWeight * 0.95, unit), missStreak: 0, prevSets: snapshot };
   }
-  return { targetWeight: prevWex.targetWeight, missStreak, prevSets: snapshot };
+  return { ...carry, missStreak, prevSets: snapshot };
 }
 
 // Perf comparison for one exercise across weeks: judged on best-set quality
 // (top weight, then reps at that weight) so it is robust to set-count changes.
 export function exercisePerf(prevWex, currWex) {
-  const prev = bestSet(doneSets(prevWex));
-  const curr = bestSet(doneSets(currWex));
+  const prev = bestSet(prevWex);
+  const curr = bestSet(currWex);
   if (!prev || !curr) return null;
   if (curr.weight > prev.weight || (curr.weight === prev.weight && curr.reps > prev.reps)) return 1;
   if (curr.weight < prev.weight || (curr.weight === prev.weight && curr.reps < prev.reps)) return -1;
@@ -168,21 +204,30 @@ export function weeklySetsPerMuscle(week, { fractional = true } = {}) {
   return totals;
 }
 
-function directSetsPerMuscle(week) {
-  return weeklySetsPerMuscle(week, { fractional: false });
+// Match each of this week's exercises to its previous-week instance by
+// exerciseId within the same day (consuming duplicates in order), so that
+// mid-meso adds, removals, and variation swaps never derail progression.
+function matchPrev(prevWeek, dayIndex, exerciseId, used) {
+  const workout = prevWeek?.workouts[dayIndex];
+  if (!workout) return null;
+  const idx = workout.exercises.findIndex((e, i) => !used.has(i) && e.exerciseId === exerciseId);
+  if (idx === -1) return null;
+  used.add(idx);
+  return workout.exercises[idx];
 }
 
 // --------------------- weekly volume decision (per muscle) -------------------
 
-// Muscle-level performance trend: +1 if >=50% of the muscle's direct exercises
+// Muscle-level performance trend: +1 if >=50% of the muscle's exercises
 // progressed, -1 if >=50% regressed, else 0 (performance-first — Mann 2010;
 // Bell 2020 performance-decrement signal).
 export function musclePerf(prevWeek, week) {
   const byMuscle = {};
   week.workouts.forEach((workout, di) => {
-    workout.exercises.forEach((wex, ei) => {
-      const prevWex = prevWeek?.workouts[di]?.exercises[ei];
-      if (!prevWex || prevWex.exerciseId !== wex.exerciseId) return;
+    const used = new Set();
+    workout.exercises.forEach((wex) => {
+      const prevWex = matchPrev(prevWeek, di, wex.exerciseId, used);
+      if (!prevWex) return;
       const p = exercisePerf(prevWex, wex);
       if (p == null) return;
       (byMuscle[wex.muscle] ||= []).push(p);
@@ -236,6 +281,11 @@ function makeSets(count) {
   return Array.from({ length: count }, () => ({ weight: null, reps: null, done: false }));
 }
 
+function slotFrom(def) {
+  const { id: exerciseId, muscle, name, type, region, repRange, secondary, equipment } = def;
+  return { exerciseId, muscle, name, type, region, repRange, secondary, equipment, bodyweight: equipment === 'bodyweight' };
+}
+
 function slotToWex(slot, prescription) {
   return {
     exerciseId: slot.exerciseId,
@@ -243,8 +293,9 @@ function slotToWex(slot, prescription) {
     name: slot.name,
     type: slot.type,
     region: slot.region,
-    repRange: slot.repRange,
+    repRange: prescription.repRange ?? slot.repRange,
     secondary: slot.secondary,
+    bodyweight: slot.bodyweight,
     targetWeight: prescription.targetWeight ?? null,
     missStreak: prescription.missStreak ?? 0,
     prevSets: prescription.prevSets ?? null,
@@ -260,6 +311,7 @@ function buildWeek(meso, weekIndex, isDeload, prescribe) {
     isDeload,
     rir: { compound: rir.compound, isolation: rir.isolation },
     perf: null, // filled when the following week is generated
+    notes: [],
     workouts: meso.days.map((day, di) => ({
       dayIndex: di,
       name: day.name,
@@ -270,24 +322,23 @@ function buildWeek(meso, weekIndex, isDeload, prescribe) {
   };
 }
 
-// config: { name, weeksTotal 4-6, unit, days: [{ name, slots: [{ exerciseId }] }] }
+// config: { name, weeksTotal 4-6, unit, environment, days: [{ name, slots: [{ exerciseId }] }] }
 export function createMesocycle(config, id) {
   const days = (config.days || []).map((d, i) => ({
     name: (d.name || '').trim() || `Day ${i + 1}`,
     slots: d.slots.map((s) => {
-      const found = getExercise(s.exerciseId);
-      if (!found) throw new Error(`Unknown exercise id ${s.exerciseId}`);
-      const { id: exerciseId, muscle, name, type, region, repRange, secondary } = found;
-      return { exerciseId, muscle, name, type, region, repRange, secondary };
+      const def = getExercise(s.exerciseId);
+      if (!def) throw new Error(`Unknown exercise id ${s.exerciseId}`);
+      return slotFrom(def);
     }),
   }));
-  if (days.length === 0 || days.some((d) => d.slots.length === 0)) {
-    throw new Error('Every training day needs at least one exercise');
-  }
+  if (days.length === 0) throw new Error('Add at least one training day');
+  const emptyDay = days.findIndex((d) => d.slots.length === 0);
+  if (emptyDay !== -1) throw new Error(`${days[emptyDay].name} has no exercises yet`);
 
   // Week 1 starts each muscle near its evidence-based starting volume
   // (Schoenfeld 2017; Baz-Valle 2022 — see VOLUME_LANDMARKS), split across
-  // that muscle's direct slots, honoring the per-session cap.
+  // that muscle's slots, honoring the per-session cap.
   const slotsPerMuscle = {};
   for (const d of days) for (const s of d.slots) slotsPerMuscle[s.muscle] = (slotsPerMuscle[s.muscle] || 0) + 1;
   const perSlot = {};
@@ -295,8 +346,8 @@ export function createMesocycle(config, id) {
     const start = VOLUME_LANDMARKS[muscle]?.startVolume ?? 8;
     perSlot[muscle] = Math.max(2, Math.min(5, Math.round(start / n)));
   }
-  // Enforce the per-session cap at creation too (Remmert 2025): when one day
-  // holds several slots for a muscle, trim the largest slots until the day fits.
+  // Per-session cap at creation too (Remmert 2025): if one day stacks several
+  // slots of a muscle, trim the largest until the day fits.
   const startSets = days.map((d) => d.slots.map((s) => perSlot[s.muscle]));
   days.forEach((d, di) => {
     const byMuscle = {};
@@ -316,54 +367,51 @@ export function createMesocycle(config, id) {
     name: (config.name || '').trim() || 'Mesocycle',
     weeksTotal: Math.max(4, Math.min(6, config.weeksTotal || 5)),
     unit: config.unit === 'kg' ? 'kg' : 'lb',
+    environment: ['gym', 'calisthenics', 'home'].includes(config.environment) ? config.environment : 'gym',
     days,
     weeks: [],
     status: 'active',
     reactiveDeload: false,
     createdAt: config.createdAt || null,
   };
-  meso.weeks.push(buildWeek(meso, 0, false, (slot, dayIndex, exIndex) => ({ sets: startSets[dayIndex][exIndex], targetWeight: null })));
+  meso.weeks.push(buildWeek(meso, 0, false, (slot, di, ei) => ({ sets: startSets[di][ei], targetWeight: null })));
   return meso;
 }
 
-// -------------------------- next-week generation -----------------------------
+// ----------------------- mid-meso program edits ------------------------------
+// Users can reshape the program while it runs. Edits apply to the current
+// pending week immediately and to every generated week after (generation reads
+// meso.days). Logged history is never rewritten.
 
-// Distribute per-muscle weekly set targets across slots as evenly as possible,
-// never exceeding SESSION_SET_CAP direct sets per muscle per day (Remmert
-// 2025 — per-session stimulus saturation).
-function distributeSets(prevWeek, muscleTargets) {
-  const slotRefs = [];
-  prevWeek.workouts.forEach((w) => {
-    w.exercises.forEach((e, ei) => {
-      slotRefs.push({ dayIndex: w.dayIndex, exIndex: ei, muscle: e.muscle, sets: e.sets.length });
-    });
-  });
-  const daySets = (muscle, dayIndex) =>
-    slotRefs.filter((s) => s.muscle === muscle && s.dayIndex === dayIndex).reduce((a, s) => a + s.sets, 0);
-
-  for (const [muscle, target] of Object.entries(muscleTargets)) {
-    const slots = slotRefs.filter((s) => s.muscle === muscle);
-    let total = slots.reduce((a, s) => a + s.sets, 0);
-    let guard = 64;
-    while (total < target && guard-- > 0) {
-      const candidates = slots
-        .filter((s) => daySets(muscle, s.dayIndex) < SESSION_SET_CAP)
-        .sort((a, b) => a.sets - b.sets);
-      if (candidates.length === 0) break; // all sessions at cap — volume saturates
-      candidates[0].sets += 1;
-      total += 1;
-    }
-    while (total > target && guard-- > 0) {
-      const candidates = slots.filter((s) => s.sets > 1).sort((a, b) => b.sets - a.sets);
-      if (candidates.length === 0) break;
-      candidates[0].sets -= 1;
-      total -= 1;
-    }
+export function addExercise(meso, dayIndex, exerciseId) {
+  const def = getExercise(exerciseId);
+  if (!def) throw new Error('Unknown exercise');
+  const slot = slotFrom(def);
+  meso.days[dayIndex].slots.push(slot);
+  const week = meso.weeks[meso.weeks.length - 1];
+  const workout = week.workouts[dayIndex];
+  if (workout && workout.status !== 'done') {
+    // New work enters at 2 sets and calibrates — it has no history to earn more.
+    workout.exercises.push(slotToWex(slot, { sets: 2, targetWeight: null }));
   }
-  const bySlot = {};
-  for (const s of slotRefs) bySlot[`${s.dayIndex}:${s.exIndex}`] = s.sets;
-  return bySlot;
+  return def;
 }
+
+export function removeExercise(meso, dayIndex, slotIndex) {
+  const day = meso.days[dayIndex];
+  if (!day || !day.slots[slotIndex]) throw new Error('No such exercise');
+  if (day.slots.length <= 1) throw new Error('A training day needs at least one exercise');
+  const [slot] = day.slots.splice(slotIndex, 1);
+  const week = meso.weeks[meso.weeks.length - 1];
+  const workout = week.workouts[dayIndex];
+  if (workout && workout.status !== 'done') {
+    const i = workout.exercises.findIndex((e) => e.exerciseId === slot.exerciseId);
+    if (i >= 0) workout.exercises.splice(i, 1);
+  }
+  return slot;
+}
+
+// -------------------------- next-week generation -----------------------------
 
 // Reactive deload trigger: performance regressed for 2 consecutive weeks on 2+
 // of the same muscles (sustained decrement is THE validated overreaching
@@ -394,44 +442,84 @@ export function generateNextWeek(meso) {
     meso.weeksTotal = weekIndex + 1; // deload now; the meso ends a week early
   }
 
-  let setsBySlot;
-  if (isDeload) {
-    // Deload = one microcycle at half the sets and -10% load / 4 RIR, keeping
-    // frequency and exercise selection (Bell 2023 Delphi — cut effort, keep the
-    // pattern; Bell 2024 survey — ~6-day deloads, sets cut, frequency kept;
-    // Coleman 2024 — full rest costs some strength; Pancar 2026 — reduced-
-    // volume deload preserves both).
-    setsBySlot = {};
-    prevWeek.workouts.forEach((w) => {
-      w.exercises.forEach((e, ei) => {
-        setsBySlot[`${w.dayIndex}:${ei}`] = Math.max(1, Math.ceil(e.sets.length / 2));
-      });
-    });
-  } else {
-    const current = directSetsPerMuscle(prevWeek);
-    const slotsPerMuscle = {};
-    for (const d of meso.days) for (const s of d.slots) slotsPerMuscle[s.muscle] = (slotsPerMuscle[s.muscle] || 0) + 1;
-    const targets = {};
-    for (const [muscle, sets] of Object.entries(current)) {
-      const delta = volumeDelta(prevWeek.perf[muscle] ?? 0, muscleBrake(prevWeek, muscle));
-      const cap = VOLUME_LANDMARKS[muscle]?.maxVolume ?? 20;
-      targets[muscle] = Math.max(slotsPerMuscle[muscle], Math.min(cap, sets + delta));
-    }
-    setsBySlot = distributeSets(prevWeek, targets);
-  }
+  const notes = [];
 
-  const week = buildWeek(meso, weekIndex, isDeload, (slot, dayIndex, exIndex) => {
-    const prevWex = prevWeek.workouts[dayIndex].exercises[exIndex];
-    const p = progressExercise(prevWex, meso.unit);
+  // Per-slot: previous instance (matched by exerciseId), load prescription,
+  // and any variation-chain swap. Swaps mutate meso.days so they persist.
+  const matched = meso.days.map((day, di) => {
+    const used = new Set();
+    return day.slots.map((slot) => matchPrev(prevWeek, di, slot.exerciseId, used));
+  });
+  const prescriptions = meso.days.map((day, di) => day.slots.map((slot, ei) => {
+    const prevWex = matched[di][ei];
+    if (!prevWex) return { targetWeight: null, missStreak: 0, prevSets: null, repRange: slot.repRange };
+    let p = progressExercise(prevWex, meso.unit, meso.environment);
+    if (p.swapTo) {
+      const harder = getExercise(p.swapTo);
+      notes.push(`${slot.name} mastered — advancing to ${harder.name}.`);
+      Object.assign(slot, slotFrom(harder));
+      p = { targetWeight: null, missStreak: 0, prevSets: null, repRange: harder.repRange };
+    }
     if (isDeload) {
-      // Deload from the load actually used in the last accumulation week — a
-      // progression bump has no place in a fatigue-dissipation week.
+      // Deload from the load actually used last week — a progression bump has
+      // no place in a fatigue-dissipation week.
       const base = prevWex.targetWeight ?? p.targetWeight;
       p.targetWeight = base != null ? roundLoad(base * 0.9, meso.unit) : null;
       p.missStreak = 0;
     }
-    return { sets: setsBySlot[`${dayIndex}:${exIndex}`], ...p };
-  });
+    return p;
+  }));
+
+  // Set counts: start from the matched previous sets (2 for brand-new slots).
+  const baseSets = meso.days.map((day, di) => day.slots.map((slot, ei) => matched[di][ei]?.sets.length ?? 2));
+
+  let setsBySlot;
+  if (isDeload) {
+    // Deload = one microcycle at half the sets and -10% load / 4 RIR, keeping
+    // frequency and exercise selection (Bell 2023 Delphi — cut effort, keep the
+    // pattern; Bell 2024 survey; Coleman 2024 — full rest costs some strength;
+    // Pancar 2026 — reduced-volume deload preserves both).
+    setsBySlot = baseSets.map((day) => day.map((n) => Math.max(1, Math.ceil(n / 2))));
+  } else {
+    const slotRefs = [];
+    meso.days.forEach((day, di) => day.slots.forEach((slot, ei) => {
+      slotRefs.push({ di, ei, muscle: slot.muscle, sets: baseSets[di][ei] });
+    }));
+    const current = {};
+    for (const r of slotRefs) current[r.muscle] = (current[r.muscle] || 0) + r.sets;
+    const slotsPerMuscle = {};
+    for (const r of slotRefs) slotsPerMuscle[r.muscle] = (slotsPerMuscle[r.muscle] || 0) + 1;
+    const daySets = (muscle, di) => slotRefs.filter((r) => r.muscle === muscle && r.di === di).reduce((a, r) => a + r.sets, 0);
+
+    for (const [muscle, sets] of Object.entries(current)) {
+      const delta = volumeDelta(prevWeek.perf[muscle] ?? 0, muscleBrake(prevWeek, muscle));
+      const cap = VOLUME_LANDMARKS[muscle]?.maxVolume ?? 20;
+      const target = Math.max(slotsPerMuscle[muscle], Math.min(cap, sets + delta));
+      const slots = slotRefs.filter((r) => r.muscle === muscle);
+      let total = sets;
+      let guard = 64;
+      while (total < target && guard-- > 0) {
+        const open = slots.filter((r) => daySets(muscle, r.di) < SESSION_SET_CAP).sort((a, b) => a.sets - b.sets);
+        if (open.length === 0) break; // every session at cap — volume saturates
+        open[0].sets += 1;
+        total += 1;
+      }
+      while (total > target && guard-- > 0) {
+        const shrinkable = slots.filter((r) => r.sets > 1).sort((a, b) => b.sets - a.sets);
+        if (shrinkable.length === 0) break;
+        shrinkable[0].sets -= 1;
+        total -= 1;
+      }
+    }
+    setsBySlot = baseSets.map((day) => day.slice());
+    for (const r of slotRefs) setsBySlot[r.di][r.ei] = r.sets;
+  }
+
+  const week = buildWeek(meso, weekIndex, isDeload, (slot, di, ei) => ({
+    sets: setsBySlot[di][ei],
+    ...prescriptions[di][ei],
+  }));
+  week.notes = notes;
   meso.weeks.push(week);
   return week;
 }

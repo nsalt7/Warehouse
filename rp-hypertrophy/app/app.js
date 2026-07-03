@@ -3,9 +3,13 @@
 
 import {
   createMesocycle, finishWorkout, currentPosition, weeklySetsPerMuscle,
-  e1rm, SORENESS, WORKLOAD, PUMP, JOINT_PAIN, REST_SECONDS,
+  addExercise, removeExercise, e1rm,
+  SORENESS, WORKLOAD, PUMP, JOINT_PAIN, REST_SECONDS,
 } from './engine.js';
-import { EXERCISES, MUSCLES, VOLUME_LANDMARKS, exercisesForMuscle, getExercise } from './exercises.js';
+import {
+  MUSCLES, VOLUME_LANDMARKS, ENVIRONMENTS, CONDITIONS,
+  exercisesForMuscle, getExercise, conflictsWith, alternativeFor,
+} from './exercises.js';
 import { TEMPLATES } from './templates.js';
 import { loadState, saveState, newId, exportJSON, parseImport } from './store.js';
 
@@ -17,12 +21,15 @@ const toastEl = document.getElementById('toast');
 let state = loadState();
 const persist = () => saveState(state);
 const getMeso = (id) => state.mesocycles.find((m) => m.id === id);
+const profile = () => state.settings.profile;
 
 // ------------------------------- utilities ---------------------------------
 
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 const fmtW = (w) => (w == null ? '—' : (Math.round(w * 100) / 100).toString());
+const envLabel = (id) => ENVIRONMENTS.find((e) => e.id === id)?.label ?? id;
+const envPhrase = (id) => ({ gym: 'the gym', calisthenics: 'the bar park', home: 'training at home' }[id] ?? id);
 
 function toast(msg, ms = 3200) {
   toastEl.textContent = msg;
@@ -101,7 +108,7 @@ function startRest(seconds, label) {
     if (left <= 0) {
       stopRest();
       chime();
-      toast('Rest done — next set 💪', 2500);
+      toast('Rest over — next set.', 2200);
       return;
     }
     render();
@@ -118,6 +125,7 @@ function stopRest() {
 function route() {
   stopRest();
   modalRoot.innerHTML = '';
+  if (!state.settings.onboarded) return renderOnboarding();
   const hash = location.hash || '#/';
   const mWorkout = hash.match(/^#\/meso\/([^/]+)\/w\/(\d+)\/(\d+)$/);
   const mOverview = hash.match(/^#\/meso\/([^/]+)\/overview$/);
@@ -139,6 +147,89 @@ function withMeso(id, fn) {
   fn(meso);
 }
 window.addEventListener('hashchange', route);
+
+// ------------------------------ onboarding -----------------------------------
+
+function renderOnboarding(editing = false) {
+  const draft = {
+    environment: profile().environment || 'gym',
+    conditions: [...(profile().conditions || [])],
+    unit: state.settings.unit || 'lb',
+  };
+
+  function render() {
+    const body = `
+      <p class="eyebrow">${editing ? 'Training profile' : 'Set up'}</p>
+      <h2>${editing ? 'Update your profile' : 'Two questions before your first session'}</h2>
+
+      <div class="ob-block">
+        <div class="ob-label">Where do you usually train?</div>
+        <div class="ob-options" data-testid="ob-env">
+          ${ENVIRONMENTS.map((e) => `
+            <button class="ob-opt ${draft.environment === e.id ? 'on' : ''}" data-env="${e.id}" data-testid="ob-env-${e.id}">
+              <b>${esc(e.label)}</b>
+              <span>${esc(e.blurb)}</span>
+            </button>`).join('')}
+        </div>
+        <div class="row" style="margin-top:10px; gap:8px">
+          <span class="faint small">Units</span>
+          <div class="seg" id="ob-unit">
+            ${['lb', 'kg'].map((u) => `<button data-unit="${u}" class="${draft.unit === u ? 'on' : ''}">${u}</button>`).join('')}
+          </div>
+        </div>
+      </div>
+
+      <div class="ob-block">
+        <div class="ob-label">Anything to train around?</div>
+        <p class="faint small" style="margin:0 0 8px">Movements that stress a flagged area get swapped or warned about.
+        This is programming logic, not medical advice — train with your clinician's blessing if something's injured.</p>
+        <div class="ob-conditions" data-testid="ob-conditions">
+          ${CONDITIONS.map((c) => `
+            <button class="ob-cond ${draft.conditions.includes(c.excludes) ? 'on' : ''}" data-cond="${c.excludes}" data-testid="ob-cond-${c.id}">
+              ${esc(c.label)}
+            </button>`).join('')}
+        </div>
+      </div>
+
+      <div class="modal-foot">
+        ${editing ? '<button class="btn ghost" id="ob-cancel">Cancel</button>' : '<span class="faint small">Change any of this later under Data.</span>'}
+        <span class="grow"></span>
+        <button class="btn primary" id="ob-done" data-testid="ob-done">${editing ? 'Save profile' : 'Start training'}</button>
+      </div>`;
+
+    if (editing) {
+      modalRoot.innerHTML = `<div class="modal-backdrop"><div class="modal">${body}</div></div>`;
+    } else {
+      app.innerHTML = `<div class="card hero" style="max-width:560px; margin:24px auto 0; padding:24px 22px" data-testid="onboarding">${body}</div>`;
+    }
+    const root = editing ? modalRoot : app;
+    root.querySelectorAll('[data-env]').forEach((el) => el.addEventListener('click', () => {
+      draft.environment = el.dataset.env; render();
+    }));
+    root.querySelector('#ob-unit').querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
+      draft.unit = b.dataset.unit; render();
+    }));
+    root.querySelectorAll('[data-cond]').forEach((el) => el.addEventListener('click', () => {
+      const c = el.dataset.cond;
+      draft.conditions = draft.conditions.includes(c) ? draft.conditions.filter((x) => x !== c) : [...draft.conditions, c];
+      render();
+    }));
+    root.querySelector('#ob-cancel')?.addEventListener('click', () => { modalRoot.innerHTML = ''; });
+    root.querySelector('#ob-done').addEventListener('click', () => {
+      state.settings.profile = { environment: draft.environment, conditions: draft.conditions };
+      state.settings.unit = draft.unit;
+      state.settings.onboarded = true;
+      persist();
+      if (editing) {
+        modalRoot.innerHTML = '';
+        toast('Profile saved.');
+      } else {
+        route();
+      }
+    });
+  }
+  render();
+}
 
 // ------------------------------- dashboard ----------------------------------
 
@@ -167,16 +258,16 @@ function renderDashboard() {
             <rect x="26" y="12" width="4" height="8" rx="1.5" fill="#e5484d"/>
           </svg>
         </div>
-        <h1>Train. Log. Grow.</h1>
-        <p class="muted" style="margin:10px auto 0; max-width:420px">Plan a mesocycle, log your sets, and let an
-        evidence-based engine decide next week's volume and loads.</p>
+        <h1>No mesocycle on the books</h1>
+        <p class="muted" style="margin:10px auto 0; max-width:420px">Pick a program built for ${envPhrase(profile().environment)},
+        log your sets, and the engine handles the rest: volume, loads, and the deload.</p>
         <ul class="feature-list">
-          <li>Volume rises only when your performance earns it</li>
+          <li>Sets rise only when your logged performance earns them</li>
           <li>Soreness and joint pain pull volume back before you dig a hole</li>
-          <li>Deloads are scheduled — and triggered early if you're overreached</li>
+          <li>Regress two weeks running and the deload comes to you early</li>
         </ul>
         <div style="margin-top:24px">
-          <a class="btn primary" href="#/new" data-testid="new-meso">Plan your first mesocycle</a>
+          <a class="btn primary" href="#/new" data-testid="new-meso">Plan a mesocycle</a>
         </div>
       </div>`;
     return;
@@ -206,8 +297,8 @@ function heroCard(meso) {
       </div>
       ${weekDots(meso)}
       <div class="row spread" style="margin-top:12px">
-        <span class="muted small">Next up: <b style="color:var(--ink)">${esc(workout.name)}</b> · ${meso.days.length} days/week · ${esc(meso.unit)}</span>
-        <span class="btn primary sm">Continue →</span>
+        <span class="muted small">Next: <b style="color:var(--ink)">${esc(workout.name)}</b> · ${envLabel(meso.environment)} · ${meso.days.length} days/week</span>
+        <span class="btn primary sm">Continue</span>
       </div>
     </a>`;
 }
@@ -219,7 +310,7 @@ function smallCard(meso) {
       <div class="row spread">
         <div>
           <b>${esc(meso.name)}</b>
-          <div class="faint small">${meso.weeksTotal} weeks · ${meso.days.length} days/week</div>
+          <div class="faint small">${envLabel(meso.environment)} · ${meso.weeksTotal} weeks · ${meso.days.length} days/week</div>
         </div>
         ${meso.status === 'complete'
           ? '<span class="chip good">Complete</span>'
@@ -230,21 +321,49 @@ function smallCard(meso) {
 
 // ------------------------------- builder ------------------------------------
 
+// Option label with a caution note when the movement stresses a flagged area.
+function exOptionLabel(exercise) {
+  const flags = conflictsWith(exercise, profile().conditions);
+  const parts = [exercise.name];
+  if (exercise.lengthened) parts.push('· stretch');
+  if (flags.length) parts.push(`· caution: ${flags.map((f) => CONDITIONS.find((c) => c.excludes === f)?.label.split(' ')[0].toLowerCase() || f).join(', ')}`);
+  return parts.join(' ');
+}
+
 function renderBuilder() {
-  const draft = { name: '', weeksTotal: 5, unit: state.settings.unit || 'lb', days: [{ name: 'Day 1', slots: [] }], templateId: null };
+  const draft = {
+    name: '',
+    weeksTotal: 5,
+    unit: state.settings.unit || 'lb',
+    environment: profile().environment || 'gym',
+    days: [{ name: 'Day 1', slots: [] }],
+    templateId: null,
+  };
+
+  function invalidDay() {
+    return draft.days.findIndex((d) => d.slots.length === 0);
+  }
 
   function render() {
+    const templates = TEMPLATES.filter((t) => t.environment === draft.environment);
     app.innerHTML = `
       <div class="page-head">
         <p class="eyebrow">Plan</p>
-        <h1>New mesocycle</h1>
+        <div class="row spread">
+          <h1>New mesocycle</h1>
+          <div class="seg" id="env-seg" data-testid="env-seg">
+            ${ENVIRONMENTS.map((e) => `<button data-env="${e.id}" class="${draft.environment === e.id ? 'on' : ''}" data-testid="env-${e.id}">${esc(e.label)}</button>`).join('')}
+          </div>
+        </div>
+        <p class="faint small" style="margin:8px 0 0">${esc(ENVIRONMENTS.find((e) => e.id === draft.environment)?.blurb || '')}</p>
       </div>
 
       <div class="section" style="margin-top:6px">
         <h2>Start from a program</h2>
-        <p class="section-sub">Coach-built templates — pick one, then tweak anything below.</p>
+        <p class="section-sub">Built for ${envPhrase(draft.environment)} — pick one, then tweak anything below.
+        ${profile().conditions.length ? 'Movements that clash with your profile get swapped automatically.' : ''}</p>
         <div class="template-grid">
-          ${TEMPLATES.map((t) => `
+          ${templates.map((t) => `
             <div class="card template-card ${draft.templateId === t.id ? 'selected' : ''}" data-template="${t.id}" data-testid="template-${t.id}">
               <div class="row spread"><b>${esc(t.name)}</b></div>
               <div class="desc">${esc(t.description)}</div>
@@ -271,7 +390,7 @@ function renderBuilder() {
 
       <div class="section">
         <h2>Training days</h2>
-        <p class="section-sub">Sets per exercise are chosen by the engine — you pick the movements. Stretch-position exercises are listed first.</p>
+        <p class="section-sub">You pick the movements; the engine owns set counts. Stretch-position exercises are listed first.</p>
         <div id="days"></div>
         <button class="btn sm" id="add-day" data-testid="add-day" style="margin-top:10px">+ Add a day</button>
       </div>
@@ -289,11 +408,14 @@ function renderBuilder() {
           <input type="text" class="field" value="${esc(d.name)}" data-day-name="${di}" style="width:170px; padding:6px 10px">
           ${draft.days.length > 1 ? `<button class="btn ghost sm" data-del-day="${di}">Remove day</button>` : ''}
         </div>
+        ${d.slots.length === 0 ? '<p class="faint small" style="margin:6px 0">Empty — add an exercise below.</p>' : ''}
         ${d.slots.map((s, si) => {
           const exercise = getExercise(s.exerciseId);
+          const flags = conflictsWith(exercise, profile().conditions);
           return `<div class="slot-row">
             <span class="chip muscle">${esc(exercise.muscle)}</span>
-            <span class="grow">${esc(exercise.name)}${exercise.lengthened ? ' <span class="faint small">· stretch</span>' : ''}</span>
+            <span class="grow">${esc(exercise.name)}${exercise.lengthened ? ' <span class="faint small">· stretch</span>' : ''}
+              ${flags.length ? '<span class="chip warn" style="margin-left:6px">check joints</span>' : ''}</span>
             <button class="x" data-del-slot="${di}:${si}" title="Remove">×</button>
           </div>`;
         }).join('')}
@@ -307,20 +429,59 @@ function renderBuilder() {
         </div>
       </div>`).join('');
 
+    const bad = invalidDay();
     const totalSlots = draft.days.reduce((a, d) => a + d.slots.length, 0);
-    document.getElementById('builder-status').textContent =
-      totalSlots === 0 ? 'Add at least one exercise per day' : `${draft.days.length} days · ${totalSlots} exercises`;
+    const statusEl = document.getElementById('builder-status');
+    const createBtn = document.getElementById('create');
+    if (bad !== -1) {
+      statusEl.textContent = totalSlots === 0
+        ? 'Pick a program above, or add exercises to Day 1.'
+        : `“${draft.days[bad].name}” is empty — add an exercise or remove the day.`;
+      createBtn.disabled = true;
+    } else {
+      statusEl.textContent = `${draft.days.length} ${draft.days.length === 1 ? 'day' : 'days'} · ${totalSlots} exercises · ${envLabel(draft.environment)}`;
+      createBtn.disabled = false;
+    }
 
     // events
+    document.getElementById('env-seg').querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
+      if (b.dataset.env === draft.environment) return;
+      draft.environment = b.dataset.env;
+      draft.templateId = null;
+      const dropped = [];
+      for (const d of draft.days) {
+        d.slots = d.slots.filter((s) => {
+          const ok = getExercise(s.exerciseId).envs.includes(draft.environment);
+          if (!ok) dropped.push(getExercise(s.exerciseId).name);
+          return ok;
+        });
+      }
+      render();
+      if (dropped.length) toast(`Removed ${dropped.length} ${dropped.length === 1 ? 'movement' : 'movements'} not available in ${envLabel(draft.environment)}.`, 4200);
+    }));
     document.querySelectorAll('[data-template]').forEach((el) => el.addEventListener('click', () => {
       const t = TEMPLATES.find((x) => x.id === el.dataset.template);
       draft.templateId = t.id;
       draft.name = draft.name || t.name;
       draft.weeksTotal = t.weeksTotal;
-      draft.days = t.days.map((d) => ({ name: d.name, slots: d.slots.map((s) => ({ ...s })) }));
+      // Auto-swap movements that clash with the user's profile.
+      let swapped = 0;
+      draft.days = t.days.map((d) => ({
+        name: d.name,
+        slots: d.slots.map((s) => {
+          const def = getExercise(s.exerciseId);
+          if (conflictsWith(def, profile().conditions).length) {
+            const alt = alternativeFor(def, profile().conditions, draft.environment);
+            if (alt) { swapped += 1; return { exerciseId: alt.id }; }
+          }
+          return { exerciseId: s.exerciseId };
+        }),
+      }));
       render();
       document.getElementById('days').scrollIntoView({ behavior: 'smooth', block: 'start' });
-      toast(`Loaded “${t.name}” — adjust freely, then create`);
+      toast(swapped
+        ? `Loaded ${t.name}. Swapped ${swapped} ${swapped === 1 ? 'movement' : 'movements'} to fit your profile.`
+        : `Loaded ${t.name}. Adjust freely, then create.`, 4200);
     }));
     document.getElementById('meso-name').addEventListener('input', (e) => { draft.name = e.target.value; });
     document.getElementById('weeks-seg').querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
@@ -346,9 +507,9 @@ function renderBuilder() {
       const di = Number(el.dataset.musclePick);
       const exSel = daysEl.querySelector(`[data-ex-pick="${di}"]`);
       const addBtn = daysEl.querySelector(`[data-add-slot="${di}"]`);
-      const list = exercisesForMuscle(el.value);
+      const list = exercisesForMuscle(el.value, draft.environment);
       exSel.innerHTML = '<option value="">Exercise…</option>' +
-        list.map((x) => `<option value="${x.id}">${esc(x.name)}${x.lengthened ? ' · stretch' : ''}</option>`).join('');
+        list.map((x) => `<option value="${x.id}">${esc(exOptionLabel(x))}</option>`).join('');
       exSel.disabled = list.length === 0;
       addBtn.disabled = true;
       exSel.onchange = () => { addBtn.disabled = !exSel.value; };
@@ -360,14 +521,14 @@ function renderBuilder() {
       draft.days[di].slots.push({ exerciseId: Number(exSel.value) });
       render();
     }));
-    document.getElementById('create').addEventListener('click', () => {
+    createBtn.addEventListener('click', () => {
       try {
         const meso = createMesocycle(draft, newId(state));
         meso.createdAt = new Date().toISOString();
         state.settings.unit = draft.unit;
         state.mesocycles.push(meso);
         persist();
-        toast('Mesocycle created — week 1 calibrates your working weights');
+        toast('Mesocycle created. Week 1 finds your working weights.');
         location.hash = `#/meso/${meso.id}`;
       } catch (err) {
         toast(err.message, 4200);
@@ -399,8 +560,11 @@ function renderWorkout(meso, weekIndex, dayIndex) {
   const targetLine = (wex) => {
     const rir = week.rir[wex.type] ?? week.rir.isolation;
     const [lo, hi] = wex.repRange;
+    if (wex.bodyweight && wex.targetWeight == null) {
+      return `<b>${wex.sets.length} × ${lo}–${hi} reps</b> · bodyweight · ${rir} RIR`;
+    }
     if (wex.targetWeight == null) {
-      return `Find a weight for <b>${lo}–${hi} reps</b> leaving <b>${rir} in the tank</b>`;
+      return `Find a weight for <b>${lo}–${hi} reps</b> leaving <b>${rir} in reserve</b>`;
     }
     return `<b>${wex.sets.length} × ${fmtW(wex.targetWeight)} ${meso.unit}</b> · ${lo}–${hi} reps · ${rir} RIR`;
   };
@@ -408,18 +572,22 @@ function renderWorkout(meso, weekIndex, dayIndex) {
   app.innerHTML = `
     <div class="workout-head">
       <p class="eyebrow"><a href="#/meso/${meso.id}/overview" data-testid="to-overview">${esc(meso.name)} · overview</a></p>
-      <h1 data-testid="workout-title">Week ${weekIndex + 1} · ${esc(workout.name)}</h1>
-      <div class="chips">${headChips(meso, week)}
-        ${done ? '<span class="chip good">Logged ✓</span>' : ''}
+      <div class="row spread">
+        <h1 data-testid="workout-title">Week ${weekIndex + 1} · ${esc(workout.name)}</h1>
+        <button class="btn ghost sm" id="edit-program" data-testid="edit-program">Edit day</button>
       </div>
-      ${isCalibration ? `<div class="banner info"><span>🎯</span><span><strong>Calibration week.</strong>
+      <div class="chips">${headChips(meso, week)}
+        ${done ? '<span class="chip good">Logged</span>' : ''}
+      </div>
+      ${week.notes?.length ? week.notes.map((n) => `<div class="banner info" data-testid="week-note"><strong>Progression:</strong>&nbsp;${esc(n)}</div>`).join('') : ''}
+      ${isCalibration ? `<div class="banner info"><span><strong>Calibration week.</strong>
         Work up to a weight you could lift for the shown reps with the target left in reserve. The engine
         takes it from there.</span></div>` : ''}
-      ${week.isDeload ? `<div class="banner warn"><span>🌤️</span><span><strong>Deload.</strong> Half the sets,
-        −10% load, everything easy. Recovery is the point — don't push these sets.</span></div>` : ''}
-      ${meso.reactiveDeload && week.isDeload ? `<div class="banner warn"><span>📉</span><span>This deload fired
-        <strong>early</strong>: your performance regressed two weeks running across several muscles — the
-        validated sign of overreaching. Back off now, grow later.</span></div>` : ''}
+      ${week.isDeload ? `<div class="banner warn"><span><strong>Deload.</strong> Half the sets,
+        lighter loads, nothing near failure. Recovery is the point of this week.</span></div>` : ''}
+      ${meso.reactiveDeload && week.isDeload ? `<div class="banner warn"><span>This deload fired
+        <strong>early</strong>: performance regressed two weeks running across several muscles — the
+        validated sign of overreaching. Back off now, grow after.</span></div>` : ''}
     </div>
 
     ${workout.exercises.map((wex, ei) => `
@@ -433,19 +601,19 @@ function renderWorkout(meso, weekIndex, dayIndex) {
         </div>
         <table class="set-table">
           <thead><tr>
-            <th>Set</th><th>${esc(meso.unit)}</th><th>Reps</th>${hasPrev ? '<th>Last</th>' : ''}<th></th>
+            <th>Set</th><th>${wex.bodyweight ? `+${esc(meso.unit)}` : esc(meso.unit)}</th><th>Reps</th>${hasPrev ? '<th>Last</th>' : ''}<th></th>
           </tr></thead>
           <tbody>
             ${wex.sets.map((s, si) => `
               <tr class="${s.done ? 'done-row' : ''}">
                 <td class="set-num num">${si + 1}</td>
                 <td><input type="number" inputmode="decimal" step="0.5" min="0" class="field"
-                  placeholder="${wex.targetWeight != null ? fmtW(wex.targetWeight) : '—'}"
+                  placeholder="${wex.bodyweight && wex.targetWeight == null ? 'BW' : wex.targetWeight != null ? fmtW(wex.targetWeight) : '—'}"
                   value="${s.weight ?? ''}" data-set="${ei}:${si}:weight" data-testid="weight-${ei}-${si}"></td>
                 <td><input type="number" inputmode="numeric" step="1" min="0" class="field"
                   placeholder="${wex.repRange[0]}–${wex.repRange[1]}"
                   value="${s.reps ?? ''}" data-set="${ei}:${si}:reps" data-testid="reps-${ei}-${si}"></td>
-                ${hasPrev ? `<td class="set-last">${wex.prevSets?.[si] ? `${fmtW(wex.prevSets[si].weight)} × ${wex.prevSets[si].reps}` : '—'}</td>` : ''}
+                ${hasPrev ? `<td class="set-last">${wex.prevSets?.[si] ? `${wex.prevSets[si].weight == null ? 'BW' : fmtW(wex.prevSets[si].weight)} × ${wex.prevSets[si].reps}` : '—'}</td>` : ''}
                 <td><button class="logbtn ${s.done ? 'on' : ''}" data-log="${ei}:${si}" data-testid="done-${ei}-${si}" title="Log set">
                   <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M2 7.5L5.5 11L12 3.5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
                 </button></td>
@@ -467,7 +635,7 @@ function renderWorkout(meso, weekIndex, dayIndex) {
     <div class="sticky-bar"><div class="inner">
       <span class="muted small grow num" id="set-progress"></span>
       <button class="btn primary" id="finish" data-testid="finish-workout" ${done ? 'disabled' : ''}>
-        ${done ? 'Workout logged ✓' : 'Finish workout'}
+        ${done ? 'Workout logged' : 'Finish workout'}
       </button>
     </div></div>
   `;
@@ -517,11 +685,83 @@ function renderWorkout(meso, weekIndex, dayIndex) {
     persist();
     renderWorkout(meso, weekIndex, dayIndex);
   }));
+  document.getElementById('edit-program').addEventListener('click', () => {
+    openProgramEditor(meso, weekIndex, dayIndex);
+  });
   document.getElementById('finish')?.addEventListener('click', () => {
     if (workout.status === 'done') return;
     stopRest();
     openFeedback(meso, weekIndex, dayIndex, workout);
   });
+}
+
+// ------------------------- mid-meso program editor ---------------------------
+
+function openProgramEditor(meso, weekIndex, dayIndex) {
+  const day = meso.days[dayIndex];
+
+  function render() {
+    modalRoot.innerHTML = `
+      <div class="modal-backdrop">
+        <div class="modal" data-testid="program-editor">
+          <p class="eyebrow">Edit program</p>
+          <h2>${esc(day.name)}</h2>
+          <p class="muted small" style="margin:6px 0 12px">Changes apply from this week's session onward.
+          Logged workouts stay as they were. New movements start at 2 sets and calibrate.</p>
+          ${day.slots.map((s, si) => `
+            <div class="slot-row">
+              <span class="chip muscle">${esc(s.muscle)}</span>
+              <span class="grow">${esc(s.name)}</span>
+              <button class="x" data-rm-ex="${si}" data-testid="rm-ex-${si}" title="Remove from program" ${day.slots.length <= 1 ? 'disabled' : ''}>×</button>
+            </div>`).join('')}
+          <div class="add-exercise">
+            <select class="field" id="pe-muscle" data-testid="pe-muscle">
+              <option value="">Muscle group…</option>
+              ${MUSCLES.map((m) => `<option value="${m}">${cap(m)}</option>`).join('')}
+            </select>
+            <select class="field grow" id="pe-ex" data-testid="pe-ex" disabled><option value="">Exercise…</option></select>
+            <button class="btn sm" id="pe-add" data-testid="pe-add" disabled>Add</button>
+          </div>
+          <div class="modal-foot">
+            <span class="grow"></span>
+            <button class="btn primary" id="pe-done" data-testid="pe-done">Done</button>
+          </div>
+        </div>
+      </div>`;
+
+    modalRoot.querySelectorAll('[data-rm-ex]').forEach((el) => el.addEventListener('click', () => {
+      try {
+        const removed = removeExercise(meso, dayIndex, Number(el.dataset.rmEx));
+        persist();
+        toast(`${removed.name} removed from ${day.name}.`);
+        render();
+      } catch (err) {
+        toast(err.message, 4200);
+      }
+    }));
+    const muscleSel = document.getElementById('pe-muscle');
+    const exSel = document.getElementById('pe-ex');
+    const addBtn = document.getElementById('pe-add');
+    muscleSel.addEventListener('change', () => {
+      const list = exercisesForMuscle(muscleSel.value, meso.environment);
+      exSel.innerHTML = '<option value="">Exercise…</option>' +
+        list.map((x) => `<option value="${x.id}">${esc(exOptionLabel(x))}</option>`).join('');
+      exSel.disabled = list.length === 0;
+      addBtn.disabled = true;
+      exSel.onchange = () => { addBtn.disabled = !exSel.value; };
+    });
+    addBtn.addEventListener('click', () => {
+      const def = addExercise(meso, dayIndex, Number(exSel.value));
+      persist();
+      toast(`${def.name} added to ${day.name}.`);
+      render();
+    });
+    document.getElementById('pe-done').addEventListener('click', () => {
+      modalRoot.innerHTML = '';
+      renderWorkout(meso, weekIndex, dayIndex);
+    });
+  }
+  render();
 }
 
 // ------------------------------ feedback -------------------------------------
@@ -577,10 +817,10 @@ function openFeedback(meso, weekIndex, dayIndex, workout) {
     const result = finishWorkout(meso, weekIndex, dayIndex, answers);
     persist();
     modalRoot.innerHTML = '';
-    if (result.mesoComplete) toast('Mesocycle complete 🎉');
-    else if (result.reactiveDeload) toast('Fatigue detected — an early deload was scheduled 📉', 5000);
-    else if (result.weekGenerated) toast(`Week ${meso.weeks.length} is ready — built from your performance 💪`, 4200);
-    else toast('Workout saved ✓');
+    if (result.mesoComplete) toast('Mesocycle complete.');
+    else if (result.reactiveDeload) toast('Fatigue signals detected — an early deload has been scheduled.', 5000);
+    else if (result.weekGenerated) toast(`Week ${meso.weeks.length} is ready, built from your numbers.`, 4200);
+    else toast('Workout saved.');
     location.hash = `#/meso/${meso.id}`;
     route();
   });
@@ -595,15 +835,19 @@ function collectPRs(meso) {
     for (const w of week.workouts) {
       for (const wex of w.exercises) {
         for (const s of wex.sets) {
-          if (!s.done || s.weight == null || s.reps == null) continue;
-          const score = e1rm(s.weight, s.reps);
+          if (!s.done || s.reps == null) continue;
+          const weight = s.weight ?? (wex.bodyweight ? 0 : null);
+          if (weight == null) continue;
+          const score = wex.bodyweight && weight === 0 ? s.reps : e1rm(weight, s.reps);
           const prev = best.get(wex.name);
-          if (!prev || score > prev.e1rm) best.set(wex.name, { e1rm: score, weight: s.weight, reps: s.reps, week: week.index + 1 });
+          if (!prev || score > prev.score) {
+            best.set(wex.name, { score, weight, reps: s.reps, week: week.index + 1, bodyweight: wex.bodyweight && weight === 0 });
+          }
         }
       }
     }
   }
-  return [...best.entries()].sort((a, b) => b[1].e1rm - a[1].e1rm);
+  return [...best.entries()].sort((a, b) => b[1].score - a[1].score);
 }
 
 function renderOverview(meso) {
@@ -620,10 +864,11 @@ function renderOverview(meso) {
       <div class="row spread">
         <h1>${esc(meso.name)}</h1>
         <a class="btn primary sm" href="#/meso/${meso.id}" data-testid="back-to-workout">
-          ${pos ? `Week ${pos.weekIndex + 1} · Day ${pos.dayIndex + 1} →` : 'Complete ✓'}
+          ${pos ? `Week ${pos.weekIndex + 1} · Day ${pos.dayIndex + 1}` : 'Complete'}
         </a>
       </div>
       <div class="chips row" style="margin-top:8px">${headChips(meso, latest)}
+        <span class="chip">${envLabel(meso.environment)}</span>
         ${meso.reactiveDeload ? '<span class="chip warn">Ended early — reactive deload</span>' : ''}
       </div>
     </div>
@@ -640,6 +885,7 @@ function renderOverview(meso) {
               ${meso.days.map((_, di) => {
                 if (!w) return '<td><span class="cell">·</span></td>';
                 const wo = w.workouts[di];
+                if (!wo) return '<td><span class="cell">·</span></td>';
                 const isNow = pos && pos.weekIndex === wi && pos.dayIndex === di;
                 const cls = wo.status === 'done' ? 'done' : isNow ? 'now' : '';
                 const label = wo.status === 'done' ? '✓' : isNow ? '●' : '·';
@@ -688,14 +934,14 @@ function renderOverview(meso) {
     ${prs.length ? `
     <div class="section">
       <h2>Best sets</h2>
-      <p class="section-sub">Estimated 1RM (Epley) from your logged sets — deload sets excluded.</p>
+      <p class="section-sub">Weighted lifts score by estimated 1RM (Epley); pure bodyweight movements by best reps. Deload sets excluded.</p>
       <div class="card scroll-x">
         <table class="data-table" data-testid="pr-table">
-          <tr><th>Exercise</th><th class="r">Best set</th><th class="r">est. 1RM</th><th class="r">Week</th></tr>
+          <tr><th>Exercise</th><th class="r">Best set</th><th class="r">Score</th><th class="r">Week</th></tr>
           ${prs.slice(0, 12).map(([name, p]) => `<tr>
             <td>${esc(name)}</td>
-            <td class="r">${fmtW(p.weight)} ${meso.unit} × ${p.reps}</td>
-            <td class="r"><b>${p.e1rm}</b></td>
+            <td class="r">${p.bodyweight ? `BW × ${p.reps}` : `${fmtW(p.weight)} ${meso.unit} × ${p.reps}`}</td>
+            <td class="r"><b>${p.score}</b>${p.bodyweight ? ' reps' : ''}</td>
             <td class="r">W${p.week}</td>
           </tr>`).join('')}
         </table>
@@ -728,10 +974,10 @@ function renderComplete(meso) {
   app.innerHTML = `
     <div class="card hero" data-testid="meso-complete" style="text-align:center; padding:40px 24px">
       <p class="eyebrow">Mesocycle complete</p>
-      <h1>That's a wrap on ${esc(meso.name)} 🎉</h1>
-      <p class="muted" style="max-width:440px; margin:12px auto 0">Deload done, fatigue paid off. Start the next
-      meso a touch below this one's peak volume and let the engine re-earn the climb — keep the exercises that
-      moved well and swap anything that bothered your joints.</p>
+      <h1>${esc(meso.name)} — done.</h1>
+      <p class="muted" style="max-width:440px; margin:12px auto 0">Deload finished, fatigue paid down. Start the
+      next meso a touch below this one's peak volume and let the engine re-earn the climb. Keep what moved well;
+      swap anything that argued with your joints.</p>
       <div class="row" style="justify-content:center; margin-top:22px">
         <a class="btn primary" href="#/new">Plan the next mesocycle</a>
         <a class="btn" href="#/meso/${meso.id}/overview">Review results</a>
@@ -744,20 +990,22 @@ function renderComplete(meso) {
 document.getElementById('nav-data').addEventListener('click', () => {
   modalRoot.innerHTML = `
     <div class="modal-backdrop">
-      <div class="modal" style="max-width:420px">
+      <div class="modal" style="max-width:440px">
         <p class="eyebrow">Your data</p>
-        <h2>Backup & restore</h2>
+        <h2>Backup, restore, profile</h2>
         <p class="muted small" style="margin:8px 0 16px">Everything lives on this device. Export a JSON backup to
-        move to another machine or keep your history safe.</p>
+        move machines or keep history safe.</p>
         <div class="row">
           <button class="btn" id="do-export" data-testid="do-export">Export backup</button>
           <button class="btn" id="do-import">Import backup…</button>
+          <button class="btn" id="do-profile" data-testid="do-profile">Training profile…</button>
           <span class="grow"></span>
           <button class="btn ghost" id="data-close">Close</button>
         </div>
       </div>
     </div>`;
   document.getElementById('data-close').onclick = () => { modalRoot.innerHTML = ''; };
+  document.getElementById('do-profile').onclick = () => renderOnboarding(true);
   document.getElementById('do-export').onclick = () => {
     const blob = new Blob([exportJSON(state)], { type: 'application/json' });
     const a = document.createElement('a');
@@ -766,7 +1014,7 @@ document.getElementById('nav-data').addEventListener('click', () => {
     a.click();
     URL.revokeObjectURL(a.href);
     modalRoot.innerHTML = '';
-    toast('Backup downloaded');
+    toast('Backup downloaded.');
   };
   document.getElementById('do-import').onclick = () => document.getElementById('import-file').click();
 });
@@ -776,9 +1024,10 @@ document.getElementById('import-file').addEventListener('change', async (e) => {
   if (!file) return;
   try {
     state = parseImport(await file.text());
+    state.settings = { onboarded: true, unit: 'lb', profile: { environment: 'gym', conditions: [] }, ...state.settings };
     persist();
     modalRoot.innerHTML = '';
-    toast('Backup restored');
+    toast('Backup restored.');
     location.hash = '#/';
     route();
   } catch (err) {
