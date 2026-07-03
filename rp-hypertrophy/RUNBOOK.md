@@ -69,8 +69,9 @@ generated, and `npm run ios:sync` copies the web app into it.
   completion use native haptics, and the rest timer schedules a local
   notification so it fires even with the phone locked (iOS will ask for
   notification permission the first time a rest starts).
-- **Set types (myoreps/drop sets)**: parked pending evidence review (they
-  mainly save time at equal growth).
+- ~~Set types (myoreps/drop sets)~~ **shipped** as optional last-set
+  finishers, framed honestly in-app as time-savers at equal growth (citations
+  in the engine).
 
 ## 5. Routine: shipping an update
 
