@@ -104,6 +104,44 @@ test('double progression: inside the window holds the load (chase reps)', () => 
   assert.equal(next.targetWeight, 200);
 });
 
+test('outperforming the prescription jumps from the weight actually lifted', () => {
+  // target 100 but every set done at 150 for top-of-window reps → next target
+  // builds on 150, and following the new prescription never reads as regression
+  const p = progressExercise(makeWex({
+    targetWeight: 100,
+    sets: [{ weight: 150, reps: 10, done: true }, { weight: 150, reps: 10, done: true }],
+  }), 'lb');
+  assert.equal(p.targetWeight, 155);
+});
+
+test('a heavy optional top set above target does not poison the miss streak', () => {
+  const p = progressExercise(makeWex({
+    targetWeight: 100, missStreak: 1,
+    sets: [
+      { weight: 100, reps: 9, done: true },
+      { weight: 100, reps: 8, done: true },
+      { weight: 140, reps: 3, done: true }, // optional heavy single-ish
+    ],
+  }), 'lb');
+  assert.equal(p.targetWeight, 100);
+  assert.equal(p.missStreak, 0);
+});
+
+test('working below target twice re-anchors the prescription to reality', () => {
+  const week1 = progressExercise(makeWex({
+    targetWeight: 200,
+    sets: [{ weight: 180, reps: 4, done: true }, { weight: 180, reps: 4, done: true }],
+  }), 'lb');
+  assert.equal(week1.targetWeight, 200);
+  assert.equal(week1.missStreak, 1);
+  const week2 = progressExercise(makeWex({
+    targetWeight: 200, missStreak: 1,
+    sets: [{ weight: 180, reps: 5, done: true }, { weight: 180, reps: 5, done: true }],
+  }), 'lb');
+  assert.equal(week2.targetWeight, 180);
+  assert.equal(week2.missStreak, 0);
+});
+
 test('double progression: below window bottom twice running drops the load 5%', () => {
   const missed = makeWex({ sets: [{ weight: 200, reps: 5, done: true }, { weight: 200, reps: 5, done: true }] });
   const first = progressExercise(missed, 'lb');
@@ -339,6 +377,58 @@ test('bodyweight: loading every set (vest) graduates to weighted progression', (
   });
   const p = progressExercise(dips, 'lb', 'calisthenics');
   assert.equal(p.targetWeight, 25);
+  // one loaded set with the rest left undone must NOT graduate
+  const partial = makeBWWex('Bar Dip', {
+    sets: [{ weight: 25, reps: 8, done: true }, { weight: null, reps: null, done: false }],
+  });
+  assert.equal(progressExercise(partial, 'lb', 'calisthenics').targetWeight, null);
+});
+
+test('a deload never introduces a harder variation, even after a final-week top-out', () => {
+  const meso = createMesocycle({
+    name: 'Bars', weeksTotal: 4, unit: 'lb', environment: 'calisthenics',
+    days: [{ name: 'Bars', slots: [{ exerciseId: byName('Push-Up').id }, { exerciseId: byName('Pull-Up').id }] }],
+  }, 'm1');
+  const below = (wex) => wex.repRange[1] - 1;
+  const atTop = (wex) => wex.repRange[1];
+  for (const [wk, reps] of [[0, below], [1, below], [2, atTop]]) {
+    const week = meso.weeks[wk];
+    for (const wex of week.workouts[0].exercises) {
+      for (const s of wex.sets) { s.weight = null; s.reps = reps(wex); s.done = true; }
+    }
+    finishWorkout(meso, wk, 0, { chest: { soreness: 1, workload: 1, pump: 1 }, back: { soreness: 1, workload: 1, pump: 1 } });
+  }
+  const deload = meso.weeks[3];
+  assert.equal(deload.isDeload, true);
+  assert.deepEqual(deload.workouts[0].exercises.map((e) => e.name), ['Push-Up', 'Pull-Up']);
+  assert.deepEqual(deload.notes, []);
+  assert.equal(meso.days[0].slots[0].name, 'Push-Up'); // the program was not rewritten
+});
+
+test('removeExercise with duplicate movements removes the intended instance', () => {
+  const meso = createMesocycle(sampleConfig(5), 'm1');
+  const bench = byName('Barbell Bench Press');
+  addExercise(meso, 0, bench.id); // day 0 now: Bench(5 sets), Squat, Bench(2 sets)
+  const workout = meso.weeks[0].workouts[0];
+  assert.equal(workout.exercises.filter((e) => e.exerciseId === bench.id).length, 2);
+  removeExercise(meso, 0, 2); // remove the second Bench slot
+  const remaining = workout.exercises.filter((e) => e.exerciseId === bench.id);
+  assert.equal(remaining.length, 1);
+  assert.equal(remaining[0].sets.length, 5, 'the original instance survived, not the 2-set addition');
+});
+
+test('progression chains stay within one muscle and never dead-end an environment', () => {
+  for (const e of EXERCISES) {
+    if (!e.next) continue;
+    const target = EXERCISES.find((x) => x.name === e.next);
+    assert.equal(target.muscle, e.muscle, `${e.name} → ${e.next} crosses muscles`);
+    for (const env of e.envs) {
+      if (!target.envs.includes(env)) {
+        // the chain can't advance in this env — the rep window must be able to climb instead
+        assert.ok(e.repRange[1] < 30, `${e.name} would stall permanently in ${env}`);
+      }
+    }
+  }
 });
 
 test('a calisthenics meso swaps mastered movements at week generation', () => {

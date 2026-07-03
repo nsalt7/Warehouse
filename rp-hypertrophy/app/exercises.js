@@ -164,7 +164,7 @@ export const EXERCISES = [
   ex('shoulders', 'Face Pull', { equipment: 'cable', type: I, region: U, reps: [12, 16], secondary: ['traps'] }),
   ex('shoulders', 'Pike Push-Up', { equipment: 'bodyweight', type: C, region: U, reps: [6, 12], secondary: ['triceps'], envs: ALL, next: 'Elevated Pike Push-Up', stress: ['shoulder'] }),
   ex('shoulders', 'Elevated Pike Push-Up', { equipment: 'bodyweight', type: C, region: U, reps: [5, 10], secondary: ['triceps'], envs: ALL, next: 'Wall Handstand Push-Up', stress: ['shoulder'] }),
-  ex('shoulders', 'Wall Handstand Push-Up', { equipment: 'bodyweight', type: C, region: U, reps: [3, 8], secondary: ['triceps'], envs: CH, stress: ['shoulder'] }),
+  ex('shoulders', 'Wall Handstand Push-Up', { equipment: 'bodyweight', type: C, region: U, reps: [3, 8], secondary: ['triceps'], envs: ALL, stress: ['shoulder'] }),
   ex('shoulders', 'Prone Y-Raise', { equipment: 'bodyweight', type: I, region: U, reps: [12, 20], secondary: ['traps'], envs: CH }),
   // ----- biceps -----
   ex('biceps', 'Incline Dumbbell Curl', { equipment: 'dumbbell', type: I, region: U, reps: [10, 14], lengthened: true }),
@@ -349,7 +349,7 @@ EXERCISES.push(
   xp("Wide-Grip Lat Pulldown", "back", "cable", "compound", "upper", [10, 14], true, ["biceps", "shoulders"], ["gym"], [], null, "Grip a fist-width outside your shoulders, lean back slightly, and pull the bar to your upper chest, elbows wide."),
   xp("Wide-Grip Cable Row", "back", "cable", "compound", "upper", [10, 14], true, ["shoulders", "traps", "biceps"], ["gym"], [], null, "Row the wide bar to your sternum with elbows flared, letting the shoulder blades protract fully at each stretch."),
   xp("Tuck Front Lever Row", "back", "bodyweight", "compound", "upper", [4, 10], false, ["biceps", "abs"], ["gym", "calisthenics"], [], null, "Hold a tight tuck with hips level to your shoulders and row the bar to your waist without letting the hips sag."),
-  xp("Scapular Pull-Up", "traps", "bodyweight", "isolation", "upper", [6, 15], true, ["back", "forearms"], ["gym", "calisthenics"], [], "Pull-Up", "From a dead hang, pull the shoulder blades down and together without bending the elbows, then ride them back up."),
+  xp("Scapular Pull-Up", "traps", "bodyweight", "isolation", "upper", [6, 15], true, ["back", "forearms"], ["gym", "calisthenics"], [], null, "From a dead hang, pull the shoulder blades down and together without bending the elbows, then ride them back up."),
   xp("Towel Pull-Up", "forearms", "bodyweight", "compound", "upper", [3, 10], false, ["back", "biceps"], ["gym", "calisthenics"], [], null, "Drape two towels over the bar, crush them like you're wringing out water, and pull your chin over your fists."),
   xp("Spider Curl", "biceps", "dumbbell", "isolation", "upper", [10, 14], false, [], ["gym"], [], null, "Chest pinned to the incline bench, arms hanging straight down; curl without letting the elbows drift back."),
   xp("Concentration Curl", "biceps", "dumbbell", "isolation", "upper", [10, 14], false, [], ["gym"], [], null, "Brace your triceps against your inner thigh and curl to the shoulder without rocking your torso to help."),

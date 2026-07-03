@@ -134,9 +134,9 @@ export function progressExercise(prevWex, unit, environment = 'gym') {
   // ---- bodyweight path: variation chains instead of plates ----
   if (prevWex.bodyweight && prevWex.targetWeight == null) {
     const loaded = done.filter((s) => (s.weight ?? 0) > 0);
-    if (loaded.length === done.length && loaded.length > 0) {
-      // User added external load (vest/belt) on every set — graduate to the
-      // standard weighted double progression.
+    if (allSetsDone && loaded.length === done.length && loaded.length > 0) {
+      // External load (vest/belt) on every prescribed set — graduate to the
+      // standard weighted double progression. Partial sessions don't qualify.
       return { ...carry, targetWeight: Math.max(...loaded.map((s) => s.weight)), missStreak: 0, prevSets: snapshot };
     }
     if (allSetsDone && done.every((s) => s.reps >= repHi)) {
@@ -160,17 +160,37 @@ export function progressExercise(prevWex, unit, environment = 'gym') {
     // Calibration week: adopt the heaviest weight the user actually worked with.
     return { ...carry, targetWeight: Math.max(...done.map((s) => s.weight)), missStreak: 0, prevSets: snapshot };
   }
-  const atTarget = done.filter((s) => s.weight >= prevWex.targetWeight);
-  if (allSetsDone && atTarget.length === done.length && done.every((s) => s.reps >= repHi)) {
-    const inc = loadIncrement(prevWex, prevWex.targetWeight, unit);
-    return { ...carry, targetWeight: roundLoad(prevWex.targetWeight + inc, unit), missStreak: 0, prevSets: snapshot };
+  const target = prevWex.targetWeight;
+  const atTarget = done.filter((s) => s.weight >= target);
+
+  // Every set below the prescription: the user re-anchored reality for us.
+  // One week is a bad day; two running adopts the weight actually being used
+  // (APRE-style down-adjustment — Mann 2010, JSCR).
+  if (atTarget.length === 0) {
+    const missStreak = (prevWex.missStreak || 0) + 1;
+    if (missStreak >= 2) {
+      return { ...carry, targetWeight: roundLoad(Math.max(...done.map((s) => s.weight)), unit), missStreak: 0, prevSets: snapshot };
+    }
+    return { ...carry, missStreak, prevSets: snapshot };
   }
-  // Below the window bottom two sessions running → drop the load 5% and
-  // rebuild (APRE-style down-adjustment — Mann 2010, JSCR).
-  const missedBottom = atTarget.length > 0 && Math.min(...atTarget.map((s) => s.reps)) < repLo;
+
+  if (allSetsDone && atTarget.length === done.length && done.every((s) => s.reps >= repHi)) {
+    // Base the jump on what was actually lifted, not the stale prescription —
+    // out-performing the plan must never read as regression next week.
+    const base = Math.max(target, ...atTarget.map((s) => s.weight));
+    const inc = loadIncrement(prevWex, base, unit);
+    return { ...carry, targetWeight: roundLoad(base + inc, unit), missStreak: 0, prevSets: snapshot };
+  }
+
+  // Misses are judged only on sets near the prescribed load — an optional
+  // heavy top set above target must not poison the streak. Below the window
+  // bottom two sessions running → drop the load 5% and rebuild (Mann 2010).
+  const nearTarget = atTarget.filter((s) => s.weight <= target * 1.05 + 1e-9);
+  const judged = nearTarget.length > 0 ? nearTarget : atTarget;
+  const missedBottom = Math.min(...judged.map((s) => s.reps)) < repLo;
   const missStreak = missedBottom ? (prevWex.missStreak || 0) + 1 : 0;
   if (missStreak >= 2) {
-    return { ...carry, targetWeight: roundLoad(prevWex.targetWeight * 0.95, unit), missStreak: 0, prevSets: snapshot };
+    return { ...carry, targetWeight: roundLoad(target * 0.95, unit), missStreak: 0, prevSets: snapshot };
   }
   return { ...carry, missStreak, prevSets: snapshot };
 }
@@ -340,6 +360,13 @@ export function createMesocycle(config, id) {
   if (days.length === 0) throw new Error('Add at least one training day');
   const emptyDay = days.findIndex((d) => d.slots.length === 0);
   if (emptyDay !== -1) throw new Error(`${days[emptyDay].name} has no exercises yet`);
+  for (const d of days) {
+    const perMuscle = {};
+    for (const s of d.slots) perMuscle[s.muscle] = (perMuscle[s.muscle] || 0) + 1;
+    for (const [m, n] of Object.entries(perMuscle)) {
+      if (n > SESSION_SET_CAP) throw new Error(`${d.name} has ${n} ${m} exercises — the per-session stimulus cap is ${SESSION_SET_CAP}; spread them across days`);
+    }
+  }
 
   // Week 1 starts each muscle near its evidence-based starting volume
   // (Schoenfeld 2017; Baz-Valle 2022 — see VOLUME_LANDMARKS), split across
@@ -419,11 +446,16 @@ export function removeExercise(meso, dayIndex, slotIndex) {
   const day = meso.days[dayIndex];
   if (!day || !day.slots[slotIndex]) throw new Error('No such exercise');
   if (day.slots.length <= 1) throw new Error('A training day needs at least one exercise');
+  // Match the Nth occurrence positionally so duplicate movements in one day
+  // remove the intended instance, not the first one found.
+  const occurrence = day.slots.slice(0, slotIndex)
+    .filter((s) => s.exerciseId === day.slots[slotIndex].exerciseId).length;
   const [slot] = day.slots.splice(slotIndex, 1);
   const week = meso.weeks[meso.weeks.length - 1];
   const workout = week.workouts[dayIndex];
   if (workout && workout.status !== 'done') {
-    const i = workout.exercises.findIndex((e) => e.exerciseId === slot.exerciseId);
+    let seen = 0;
+    const i = workout.exercises.findIndex((e) => e.exerciseId === slot.exerciseId && seen++ === occurrence);
     if (i >= 0) workout.exercises.splice(i, 1);
   }
   return slot;
@@ -472,7 +504,11 @@ export function generateNextWeek(meso) {
     const prevWex = matched[di][ei];
     if (!prevWex) return { targetWeight: null, missStreak: 0, prevSets: null, repRange: slot.repRange };
     let p = progressExercise(prevWex, meso.unit, meso.environment);
-    if (p.swapTo) {
+    if (p.swapTo && isDeload) {
+      // A deload keeps the pattern and cuts effort — never introduce a harder,
+      // never-practiced variation here. The advance re-earns itself next block.
+      p = { targetWeight: prevWex.targetWeight, missStreak: 0, prevSets: null, repRange: prevWex.repRange };
+    } else if (p.swapTo) {
       const harder = getExercise(p.swapTo);
       notes.push(`${slot.name} mastered — advancing to ${harder.name}.`);
       Object.assign(slot, slotFrom(harder));

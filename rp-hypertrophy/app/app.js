@@ -309,7 +309,7 @@ function heroCard(meso) {
   const week = meso.weeks[pos.weekIndex];
   const workout = week.workouts[pos.dayIndex];
   return `
-    <a class="card hero" href="#/meso/${meso.id}" data-testid="meso-card">
+    <a class="card hero" href="#/meso/${esc(meso.id)}" data-testid="meso-card">
       <p class="eyebrow">Current mesocycle</p>
       <div class="row spread">
         <h2 style="font-size:20px">${esc(meso.name)}</h2>
@@ -326,7 +326,7 @@ function heroCard(meso) {
 function smallCard(meso) {
   const pos = currentPosition(meso);
   return `
-    <a class="card" href="#/meso/${meso.id}" data-testid="meso-card">
+    <a class="card" href="#/meso/${esc(meso.id)}" data-testid="meso-card">
       <div class="row spread">
         <div>
           <b>${esc(meso.name)}</b>
@@ -587,7 +587,7 @@ function renderBuilder(fromMesoId = null) {
         state.mesocycles.push(meso);
         persist();
         toast('Mesocycle created. Week 1 finds your working weights.');
-        location.hash = `#/meso/${meso.id}`;
+        location.hash = `#/meso/${esc(meso.id)}`;
       } catch (err) {
         toast(err.message, 4200);
       }
@@ -610,7 +610,7 @@ function headChips(meso, week) {
 function renderWorkout(meso, weekIndex, dayIndex) {
   const week = meso.weeks[weekIndex];
   const workout = week?.workouts[dayIndex];
-  if (!workout) { location.hash = `#/meso/${meso.id}`; return; }
+  if (!workout) { location.hash = `#/meso/${esc(meso.id)}`; return; }
   const isCalibration = weekIndex === 0;
   const done = workout.status === 'done';
   const hasPrev = workout.exercises.some((e) => e.prevSets?.length);
@@ -629,7 +629,7 @@ function renderWorkout(meso, weekIndex, dayIndex) {
 
   app.innerHTML = `
     <div class="workout-head">
-      <p class="eyebrow"><a href="#/meso/${meso.id}/overview" data-testid="to-overview">${esc(meso.name)} · overview</a></p>
+      <p class="eyebrow"><a href="#/meso/${esc(meso.id)}/overview" data-testid="to-overview">${esc(meso.name)} · overview</a></p>
       <div class="row spread">
         <h1 data-testid="workout-title">Week ${weekIndex + 1} · ${esc(workout.name)}</h1>
         <button class="btn ghost sm" id="edit-program" data-testid="edit-program">Edit day</button>
@@ -766,7 +766,7 @@ function renderWorkout(meso, weekIndex, dayIndex) {
     if (result.mesoComplete) toast('Mesocycle complete.');
     else if (result.weekGenerated) toast(`Week ${meso.weeks.length} is ready.`);
     else toast('Workout skipped.');
-    location.hash = `#/meso/${meso.id}`;
+    location.hash = `#/meso/${esc(meso.id)}`;
     route();
   });
   document.getElementById('finish')?.addEventListener('click', () => {
@@ -955,7 +955,7 @@ function openFeedback(meso, weekIndex, dayIndex, workout) {
     else if (result.reactiveDeload) toast('Fatigue signals detected — an early deload has been scheduled.', 5000);
     else if (result.weekGenerated) toast(`Week ${meso.weeks.length} is ready, built from your numbers.`, 4200);
     else toast('Workout saved.');
-    location.hash = `#/meso/${meso.id}`;
+    location.hash = `#/meso/${esc(meso.id)}`;
     route();
   });
 }
@@ -997,7 +997,7 @@ function renderOverview(meso) {
       <p class="eyebrow"><a href="#/">Mesocycles</a></p>
       <div class="row spread">
         <h1>${esc(meso.name)}</h1>
-        <a class="btn primary sm" href="#/meso/${meso.id}" data-testid="back-to-workout">
+        <a class="btn primary sm" href="#/meso/${esc(meso.id)}" data-testid="back-to-workout">
           ${pos ? `Week ${pos.weekIndex + 1} · Day ${pos.dayIndex + 1}` : 'Complete'}
         </a>
       </div>
@@ -1023,7 +1023,7 @@ function renderOverview(meso) {
                 const isNow = pos && pos.weekIndex === wi && pos.dayIndex === di;
                 const cls = wo.status === 'done' ? 'done' : isNow ? 'now' : '';
                 const label = wo.status === 'done' ? '✓' : isNow ? '●' : '·';
-                return `<td><a class="cell ${cls}" href="#/meso/${meso.id}/w/${wi}/${di}" title="Week ${wi + 1}, ${esc(wo.name)}">${label}</a></td>`;
+                return `<td><a class="cell ${cls}" href="#/meso/${esc(meso.id)}/w/${wi}/${di}" title="Week ${wi + 1}, ${esc(wo.name)}">${label}</a></td>`;
               }).join('')}
             </tr>`;
           }).join('')}
@@ -1246,7 +1246,7 @@ function renderHistory(selectedName = null) {
       <h2>Recent sessions</h2>
       <div class="card" style="padding:6px 16px" data-testid="recent-sessions">
         ${recent.map(({ meso, week, workout }) => `
-          <a class="slot-row" href="#/meso/${meso.id}/w/${week.index}/${workout.dayIndex}">
+          <a class="slot-row" href="#/meso/${esc(meso.id)}/w/${week.index}/${workout.dayIndex}">
             <div class="grow">
               <b class="small">${esc(workout.name)}</b>
               <div class="faint small">${esc(meso.name)} · Week ${week.index + 1}${week.isDeload ? ' · deload' : ''}</div>
@@ -1272,8 +1272,8 @@ function renderComplete(meso) {
       next meso a touch below this one's peak volume and let the engine re-earn the climb. Keep what moved well;
       swap anything that argued with your joints.</p>
       <div class="row" style="justify-content:center; margin-top:22px">
-        <a class="btn primary" href="#/new/from/${meso.id}" data-testid="continue-meso">Start the next block</a>
-        <a class="btn" href="#/meso/${meso.id}/overview">Review results</a>
+        <a class="btn primary" href="#/new/from/${esc(meso.id)}" data-testid="continue-meso">Start the next block</a>
+        <a class="btn" href="#/meso/${esc(meso.id)}/overview">Review results</a>
       </div>
     </div>`;
 }
@@ -1318,7 +1318,7 @@ document.getElementById('import-file').addEventListener('change', async (e) => {
   if (!file) return;
   try {
     state = parseImport(await file.text());
-    state.settings = { onboarded: true, unit: 'lb', profile: { environment: 'gym', conditions: [] }, ...state.settings };
+    state.settings.onboarded = true;
     persist();
     modalRoot.innerHTML = '';
     toast('Backup restored.');
@@ -1332,4 +1332,29 @@ document.getElementById('import-file').addEventListener('change', async (e) => {
 
 // ----------------------------------------------------------------------------
 
-route();
+try {
+  route();
+} catch (err) {
+  app.innerHTML = `
+    <div class="card" style="margin-top:24px">
+      <h2 style="margin-bottom:8px">Something is wrong with the saved data</h2>
+      <p class="muted small">The app hit an error while loading: ${esc(err?.message ?? 'unknown')}.
+      Export a backup of the raw data before resetting so nothing is lost.</p>
+      <div class="row" style="margin-top:14px">
+        <button class="btn" id="rescue-export">Export raw data</button>
+        <button class="btn danger" id="rescue-reset">Reset app</button>
+      </div>
+    </div>`;
+  document.getElementById('rescue-export').onclick = () => {
+    const blob = new Blob([localStorage.getItem('hypertrophy-coach:v1') ?? '{}'], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'hypertrophy-coach-rescue.json';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+  document.getElementById('rescue-reset').onclick = () => {
+    localStorage.removeItem('hypertrophy-coach:v1');
+    location.reload();
+  };
+}

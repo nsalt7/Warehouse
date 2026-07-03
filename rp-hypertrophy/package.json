@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test test/engine.test.js",
+    "test": "node --test test/engine.test.js test/store.test.js",
     "test:e2e": "node test/e2e.test.js",
     "ios:sync": "cap sync ios",
     "ios:open": "cap open ios"
