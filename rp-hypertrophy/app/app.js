@@ -251,11 +251,11 @@ function renderDashboard() {
       <div class="card hero empty-hero" data-testid="empty-state">
         <div class="art">
           <svg width="56" height="56" viewBox="0 0 32 32" aria-hidden="true">
-            <rect x="2" y="12" width="4" height="8" rx="1.5" fill="#e5484d"/>
-            <rect x="7" y="9" width="4" height="14" rx="1.5" fill="#e5484d"/>
-            <rect x="12" y="14.5" width="8" height="3" rx="1.5" fill="#edeff3"/>
-            <rect x="21" y="9" width="4" height="14" rx="1.5" fill="#e5484d"/>
-            <rect x="26" y="12" width="4" height="8" rx="1.5" fill="#e5484d"/>
+            <rect x="2" y="12" width="4" height="8" rx="1.5" fill="var(--accent)"/>
+            <rect x="7" y="9" width="4" height="14" rx="1.5" fill="var(--accent)"/>
+            <rect x="12" y="14.5" width="8" height="3" rx="1.5" fill="var(--accent)"/>
+            <rect x="21" y="9" width="4" height="14" rx="1.5" fill="var(--accent)"/>
+            <rect x="26" y="12" width="4" height="8" rx="1.5" fill="var(--accent)"/>
           </svg>
         </div>
         <h1>No mesocycle on the books</h1>
