@@ -257,6 +257,15 @@ try {
   assert(nextMeso.weeks[0].workouts[0].exercises[0].targetWeight === null, 'new block recalibrates weights');
   step('next block: program carried over, volume restarts below peak');
 
+  // ---- skip workout: closes the day with nothing logged ----
+  await page.click('[data-testid="skip-workout"]');
+  await page.waitForSelector('[data-testid="confirm-modal"]');
+  await page.click('[data-testid="confirm-yes"]');
+  await page.waitForSelector('[data-testid="workout-title"]');
+  s = await readState(page);
+  assert(s.mesocycles[1].weeks[0].workouts[0].skipped === true, 'workout recorded as skipped');
+  step('skip workout: day closed, position advanced');
+
   // ---- profile conditions swap template movements ----
   await page.click('[data-testid="nav-data"]');
   await page.click('[data-testid="do-profile"]');

@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import * as engineNS from '../app/engine.js';
 import {
   rirForWeek, loadIncrement, roundLoad, progressExercise, exercisePerf,
   musclePerf, muscleBrake, volumeDelta, createMesocycle, generateNextWeek,
@@ -492,6 +493,46 @@ test('priorities carry into the next block without double-reducing volume', () =
 test('every exercise ships with a coaching cue', () => {
   const missing = EXERCISES.filter((e) => !e.cue || e.cue.length < 15).map((e) => e.name);
   assert.deepEqual(missing, []);
+});
+
+test('library integrity: unique slug ids, valid enums, resolvable chains, home is equipment-free', () => {
+  assert.ok(EXERCISES.length >= 150, `library size ${EXERCISES.length}`);
+  const ids = new Set();
+  const MUSCLE_SET = new Set(['chest', 'back', 'quads', 'hamstrings', 'glutes', 'shoulders', 'biceps', 'triceps', 'calves', 'abs', 'traps', 'forearms']);
+  for (const e of EXERCISES) {
+    assert.match(e.id, /^[a-z0-9-]+$/, e.name);
+    assert.ok(!ids.has(e.id), `duplicate id ${e.id}`);
+    ids.add(e.id);
+    assert.ok(MUSCLE_SET.has(e.muscle), `${e.name}: muscle ${e.muscle}`);
+    for (const s of e.secondary) assert.ok(MUSCLE_SET.has(s), `${e.name}: secondary ${s}`);
+    assert.ok(['compound', 'isolation'].includes(e.type) && ['upper', 'lower'].includes(e.region), e.name);
+    assert.ok(Array.isArray(e.repRange) && e.repRange[0] < e.repRange[1], e.name);
+    assert.ok(e.envs.length > 0 && e.envs.every((v) => ['gym', 'calisthenics', 'home'].includes(v)), e.name);
+    if (e.envs.includes('home')) assert.equal(e.equipment, 'bodyweight', e.name);
+    if (e.next) {
+      const target = EXERCISES.find((x) => x.name === e.next);
+      assert.ok(target, `${e.name} → ${e.next}`);
+      assert.ok(target.envs.some((v) => e.envs.includes(v)), `${e.name} → ${e.next} shares no environment`);
+    }
+  }
+});
+
+test('skipWorkout closes the day, carries prescriptions, and the week still completes', () => {
+  const meso = createMesocycle(sampleConfig(5), 'm1');
+  logWeek(meso, 0, () => 100, () => 10); // week 1 done normally
+  const w2 = meso.weeks[1];
+  const targetBefore = w2.workouts[0].exercises[0].targetWeight;
+  const { skipWorkout } = engineNS;
+  skipWorkout(meso, 1, 0, '2026-07-03T10:00:00.000Z');
+  assert.equal(w2.workouts[0].status, 'done');
+  assert.equal(w2.workouts[0].skipped, true);
+  // finish the other day normally → week 3 generates
+  const other = w2.workouts[1];
+  for (const wex of other.exercises) for (const s of wex.sets) { s.weight = wex.targetWeight; s.reps = 10; s.done = true; }
+  finishWorkout(meso, 1, 1, {});
+  assert.equal(meso.weeks.length, 3);
+  // the skipped day's exercise carried its prescription forward unchanged
+  assert.equal(meso.weeks[2].workouts[0].exercises[0].targetWeight, targetBefore);
 });
 
 test('environment filtering: home picker never offers gym machinery', () => {

@@ -1,12 +1,21 @@
 {
-  "name": "rp-hypertrophy-local",
-  "version": "0.1.0",
-  "description": "Local-first rebuild of the RP Hypertrophy app's core features",
+  "name": "hypertrophy-coach",
+  "version": "0.2.0",
+  "description": "Local-first hypertrophy coach with an evidence-based progression engine",
   "type": "module",
   "scripts": {
     "start": "node server.js",
     "test": "node --test test/engine.test.js",
-    "test:e2e": "node test/e2e.test.js"
+    "test:e2e": "node test/e2e.test.js",
+    "ios:sync": "cap sync ios",
+    "ios:open": "cap open ios"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "@capacitor/core": "^8.4.1"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.4.1",
+    "@capacitor/ios": "^8.4.1"
+  }
 }

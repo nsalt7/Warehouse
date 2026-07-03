@@ -161,6 +161,33 @@ export const TEMPLATES = [
       day('Session B', 'Leg Press', 'Overhead Press', 'Chest-Supported Row', 'Dumbbell Lateral Raise'),
     ],
   },
+  {
+    id: 'powerbuilding-4x',
+    name: 'Powerbuilding 4x',
+    level: 'Intermediate–Advanced',
+    description: 'Strength and size in one block: a heavy compound opens every session, hypertrophy work fills in behind it. For lifters who still care about the number on the bar.',
+    environment: 'gym',
+    weeksTotal: 5,
+    days: [
+      day('Squat + Lower', 'Back Squat', 'Romanian Deadlift', 'Leg Extension', 'Standing Calf Raise'),
+      day('Bench + Upper', 'Barbell Bench Press', 'Chest-Supported Row', 'Dumbbell Lateral Raise', 'Cable Pushdown (Bar)'),
+      day('Deadlift + Lower', 'Deadlift', 'Leg Press', 'Seated Leg Curl', 'Cable Crunch'),
+      day('Press + Upper', 'Overhead Press', 'Wide-Grip Lat Pulldown', 'Incline Dumbbell Press', 'EZ-Bar Curl'),
+    ],
+  },
+  {
+    id: 'time-crunch-3x',
+    name: 'Time-Crunch 3x — 40 minutes',
+    level: 'All levels',
+    description: 'Four movements a session, rest kept honest by the timer, everything trained twice a week. The plan for the month your calendar wins.',
+    environment: 'gym',
+    weeksTotal: 4,
+    days: [
+      day('A', 'Hack Squat', 'Dumbbell Bench Press', 'Neutral-Grip Pulldown', 'Seated Leg Curl'),
+      day('B', 'Leg Press', 'Machine Shoulder Press', 'Chest-Supported Row', 'Cable Crunch'),
+      day('C', 'Dumbbell Romanian Deadlift', 'Machine Chest Press', 'Seated Cable Row', 'Standing Calf Raise'),
+    ],
+  },
   // ----- calisthenics (bar park) -----
   {
     id: 'bar-park-full-body-3x',

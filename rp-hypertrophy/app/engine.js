@@ -544,11 +544,12 @@ export function generateNextWeek(meso) {
 
 // ------------------------------ workout flow ---------------------------------
 
-export function finishWorkout(meso, weekIndex, dayIndex, feedback, finishedAt = null) {
+export function finishWorkout(meso, weekIndex, dayIndex, feedback, finishedAt = null, { skipped = false } = {}) {
   const week = meso.weeks[weekIndex];
   const workout = week?.workouts[dayIndex];
   if (!workout) throw new Error('No such workout');
   workout.status = 'done';
+  workout.skipped = skipped;
   workout.finishedAt = finishedAt;
   workout.feedback = feedback || {};
 
@@ -565,6 +566,13 @@ export function finishWorkout(meso, weekIndex, dayIndex, feedback, finishedAt = 
     }
   }
   return { weekGenerated, mesoComplete, reactiveDeload: meso.reactiveDeload && weekGenerated && meso.weeks[meso.weeks.length - 1].isDeload };
+}
+
+// Life happens: a skipped workout closes the day with nothing logged. Unlogged
+// exercises carry their prescriptions forward unchanged (see progressExercise),
+// missing feedback defaults to "hold", and the week can still complete.
+export function skipWorkout(meso, weekIndex, dayIndex, finishedAt = null) {
+  return finishWorkout(meso, weekIndex, dayIndex, {}, finishedAt, { skipped: true });
 }
 
 export function currentPosition(meso) {

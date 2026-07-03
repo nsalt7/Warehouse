@@ -27,8 +27,40 @@ export function loadState() {
   }
 }
 
+// Native mirror: inside the Capacitor shell, every save is also written to the
+// iOS Preferences store (UserDefaults-backed), which survives WKWebView
+// website-data eviction. In the browser this is a no-op.
+function nativePrefs() {
+  return globalThis.Capacitor?.Plugins?.Preferences ?? null;
+}
+
+// Call once before first render. If the web-layer storage came up empty but a
+// native mirror exists (e.g. localStorage was evicted), restore from it.
+export async function initStore() {
+  const prefs = nativePrefs();
+  if (!prefs) return;
+  try {
+    if (!localStorage.getItem(KEY)) {
+      const { value } = await prefs.get({ key: KEY });
+      if (value) localStorage.setItem(KEY, value);
+    }
+  } catch { /* mirror unavailable — localStorage remains the source of truth */ }
+}
+
+// Returns false if persisting failed (e.g. storage quota) so the UI can warn.
 export function saveState(state) {
-  localStorage.setItem(KEY, JSON.stringify(state));
+  let ok = true;
+  let json;
+  try {
+    json = JSON.stringify(state);
+    localStorage.setItem(KEY, json);
+  } catch {
+    ok = false;
+  }
+  try {
+    if (json != null) nativePrefs()?.set({ key: KEY, value: json });
+  } catch { /* mirror write is best-effort */ }
+  return ok;
 }
 
 export function newId(state) {

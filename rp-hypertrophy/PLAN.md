@@ -100,6 +100,33 @@ Because everything is static files + localStorage behind a four-function storage
 interface, an iOS build is a thin wrap (Capacitor/WKWebView) with native storage
 swapped in — no rewrite. `node server.js` → http://localhost:4780 for desktop.
 
+## Part 4: Release plan (v0.2 — iOS-ready release candidate)
+
+**Packaging decision:** Capacitor. The app is dependency-free static files, so
+Capacitor wraps it losslessly in a native WKWebView shell with a plugin bridge;
+alternatives were considered and rejected for v1 (React Native/Expo = rewrite;
+Tauri iOS = immature; PWA-only = no App Store). Capacitor 8 uses Swift Package
+Manager, so there is no CocoaPods step. The `ios/` project is committed;
+`npm run ios:sync && npm run ios:open` on a Mac is the whole build loop
+(see RUNBOOK.md).
+
+**User management decision:** none in v1, on purpose. Local-first storage
+(localStorage + a native Preferences mirror inside the shell + JSON
+backup/restore) means no accounts, no server, an all-green App Store privacy
+label, and nothing to maintain. The documented upgrade path when multi-device
+sync is demanded: CloudKit through a Capacitor plugin — Apple-native, free, and
+avoids Sign-in-with-Apple obligations since there is no third-party login.
+
+**Hardening shipped with this round:** slug-based exercise IDs (saved data
+survives library edits — positional IDs were a data-corruption bug waiting to
+ship), skip-workout flow, storage-failure warnings, native-storage restore
+path, PWA manifest + generated icon set, accessibility labels on the logging
+grid, and a ~160-exercise library (agent-drafted, test-validated).
+
+Remaining before App Store submission (all user-side, see RUNBOOK.md): Apple
+Developer enrollment, a Mac build + on-device QA pass, store listing assets,
+and a final name check.
+
 ### Feature set beyond the core loop
 
 - Rest timer with chime (2:30 compounds / 1:30 isolation — Schoenfeld 2016,

@@ -2,7 +2,7 @@
 // persistence in store.js. This file only renders state and routes events.
 
 import {
-  createMesocycle, finishWorkout, currentPosition, weeklySetsPerMuscle,
+  createMesocycle, finishWorkout, skipWorkout, currentPosition, weeklySetsPerMuscle,
   addExercise, removeExercise, e1rm, nextMesoConfig,
   SORENESS, WORKLOAD, PUMP, JOINT_PAIN, REST_SECONDS,
 } from './engine.js';
@@ -11,7 +11,9 @@ import {
   exercisesForMuscle, getExercise, conflictsWith, alternativeFor,
 } from './exercises.js';
 import { TEMPLATES } from './templates.js';
-import { loadState, saveState, newId, exportJSON, parseImport } from './store.js';
+import { loadState, saveState, initStore, newId, exportJSON, parseImport } from './store.js';
+
+await initStore(); // restore from the native mirror before first render (no-op in browsers)
 
 const app = document.getElementById('app');
 const modalRoot = document.getElementById('modal-root');
@@ -19,7 +21,13 @@ const restRoot = document.getElementById('rest-root');
 const toastEl = document.getElementById('toast');
 
 let state = loadState();
-const persist = () => saveState(state);
+let warnedSave = false;
+const persist = () => {
+  if (!saveState(state) && !warnedSave) {
+    warnedSave = true;
+    toast('Could not save — storage may be full. Export a backup now.', 6000);
+  }
+};
 const getMeso = (id) => state.mesocycles.find((m) => m.id === id);
 const profile = () => state.settings.profile;
 
@@ -568,7 +576,7 @@ function renderBuilder(fromMesoId = null) {
       const di = Number(el.dataset.addSlot);
       const exSel = daysEl.querySelector(`[data-ex-pick="${di}"]`);
       if (!exSel.value) return;
-      draft.days[di].slots.push({ exerciseId: Number(exSel.value) });
+      draft.days[di].slots.push({ exerciseId: exSel.value });
       render();
     }));
     createBtn.addEventListener('click', () => {
@@ -660,12 +668,14 @@ function renderWorkout(meso, weekIndex, dayIndex) {
                 <td class="set-num num">${si + 1}</td>
                 <td><input type="number" inputmode="decimal" step="0.5" min="0" class="field"
                   placeholder="${wex.bodyweight && wex.targetWeight == null ? 'BW' : wex.targetWeight != null ? fmtW(wex.targetWeight) : '—'}"
+                  aria-label="${esc(wex.name)} set ${si + 1} weight"
                   value="${s.weight ?? ''}" data-set="${ei}:${si}:weight" data-testid="weight-${ei}-${si}"></td>
                 <td><input type="number" inputmode="numeric" step="1" min="0" class="field"
                   placeholder="${wex.repRange[0]}–${wex.repRange[1]}"
+                  aria-label="${esc(wex.name)} set ${si + 1} reps"
                   value="${s.reps ?? ''}" data-set="${ei}:${si}:reps" data-testid="reps-${ei}-${si}"></td>
                 ${hasPrev ? `<td class="set-last">${wex.prevSets?.[si] ? `${wex.prevSets[si].weight == null ? 'BW' : fmtW(wex.prevSets[si].weight)} × ${wex.prevSets[si].reps}` : '—'}</td>` : ''}
-                <td><button class="logbtn ${s.done ? 'on' : ''}" data-log="${ei}:${si}" data-testid="done-${ei}-${si}" title="Log set">
+                <td><button class="logbtn ${s.done ? 'on' : ''}" data-log="${ei}:${si}" data-testid="done-${ei}-${si}" title="Log set" aria-label="Log ${esc(wex.name)} set ${si + 1}">
                   <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M2 7.5L5.5 11L12 3.5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
                 </button></td>
               </tr>`).join('')}
@@ -685,8 +695,9 @@ function renderWorkout(meso, weekIndex, dayIndex) {
 
     <div class="sticky-bar"><div class="inner">
       <span class="muted small grow num" id="set-progress"></span>
+      ${done ? '' : '<button class="btn ghost sm" id="skip-workout" data-testid="skip-workout">Skip</button>'}
       <button class="btn primary" id="finish" data-testid="finish-workout" ${done ? 'disabled' : ''}>
-        ${done ? 'Workout logged' : 'Finish workout'}
+        ${done ? (workout.skipped ? 'Skipped' : 'Workout logged') : 'Finish workout'}
       </button>
     </div></div>
   `;
@@ -741,6 +752,22 @@ function renderWorkout(meso, weekIndex, dayIndex) {
   }));
   document.getElementById('edit-program').addEventListener('click', () => {
     openProgramEditor(meso, weekIndex, dayIndex);
+  });
+  document.getElementById('skip-workout')?.addEventListener('click', async () => {
+    const ok = await confirmModal({
+      title: 'Skip this workout?',
+      body: 'It closes with nothing logged. Prescriptions carry forward unchanged, and the week can still complete.',
+      action: 'Skip workout',
+      danger: false,
+    });
+    if (!ok) return;
+    const result = skipWorkout(meso, weekIndex, dayIndex, new Date().toISOString());
+    persist();
+    if (result.mesoComplete) toast('Mesocycle complete.');
+    else if (result.weekGenerated) toast(`Week ${meso.weeks.length} is ready.`);
+    else toast('Workout skipped.');
+    location.hash = `#/meso/${meso.id}`;
+    route();
   });
   document.getElementById('finish')?.addEventListener('click', () => {
     if (workout.status === 'done') return;
@@ -858,7 +885,7 @@ function openProgramEditor(meso, weekIndex, dayIndex) {
       exSel.onchange = () => { addBtn.disabled = !exSel.value; };
     });
     addBtn.addEventListener('click', () => {
-      const def = addExercise(meso, dayIndex, Number(exSel.value));
+      const def = addExercise(meso, dayIndex, exSel.value);
       persist();
       toast(`${def.name} added to ${day.name}.`);
       render();
@@ -1259,8 +1286,8 @@ document.getElementById('nav-data').addEventListener('click', () => {
       <div class="modal" style="max-width:440px">
         <p class="eyebrow">Your data</p>
         <h2>Backup, restore, profile</h2>
-        <p class="muted small" style="margin:8px 0 16px">Everything lives on this device. Export a JSON backup to
-        move machines or keep history safe.</p>
+        <p class="muted small" style="margin:8px 0 16px">Everything lives on this device — nothing is collected or
+        sent anywhere. Export a JSON backup to move machines or keep history safe.</p>
         <div class="row">
           <button class="btn" id="do-export" data-testid="do-export">Export backup</button>
           <button class="btn" id="do-import">Import backup…</button>
@@ -1268,6 +1295,7 @@ document.getElementById('nav-data').addEventListener('click', () => {
           <span class="grow"></span>
           <button class="btn ghost" id="data-close">Close</button>
         </div>
+        <p class="faint small" style="margin:14px 0 0">Hypertrophy Coach v0.2.0 · training guidance, not medical advice.</p>
       </div>
     </div>`;
   document.getElementById('data-close').onclick = () => { modalRoot.innerHTML = ''; };

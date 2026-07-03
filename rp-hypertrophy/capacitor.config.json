@@ -1,0 +1,9 @@
+{
+  "appId": "com.nathansalt.hypertrophycoach",
+  "appName": "Hypertrophy Coach",
+  "webDir": "app",
+  "ios": {
+    "contentInset": "automatic",
+    "backgroundColor": "#f2f2f7"
+  }
+}

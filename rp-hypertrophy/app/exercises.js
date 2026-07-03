@@ -71,13 +71,15 @@ export const VOLUME_LANDMARKS = {
 // Sports; Lopez 2021, MSSE). Windows are 4 reps wide for loaded lifts so one
 // jump lands back inside the window (Plotkin 2022); bodyweight windows are
 // wider because reps are the only dial between variations.
-let nextId = 1;
+// IDs are slugs of the (stable) exercise name, not array positions, so saved
+// training data survives any reordering or insertion in this file.
+export const slugId = (name) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 function ex(muscle, name, opts) {
   const {
     equipment, type, region, reps, lengthened = false, secondary = [],
     envs = ['gym'], stress = [], next = null,
   } = opts;
-  return { id: nextId++, muscle, name, equipment, type, region, repRange: reps, lengthened, secondary, envs, stress, next };
+  return { id: slugId(name), muscle, name, equipment, type, region, repRange: reps, lengthened, secondary, envs, stress, next };
 }
 const C = 'compound', I = 'isolation', U = 'upper', L = 'lower';
 const GYM = ['gym'], CAL = ['calisthenics'], ALL = ['gym', 'calisthenics', 'home'];
@@ -320,6 +322,68 @@ const CUES = {
 };
 
 for (const e of EXERCISES) e.cue = CUES[e.name] ?? null;
+
+// ---------------------------------------------------------------------------
+// Library expansion (drafted by coaching agents, validated by the test suite).
+// xp(name, muscle, equipment, type, region, repRange, lengthened, secondary,
+//    envs, stress, next, cue)
+function xp(name, muscle, equipment, type, region, repRange, lengthened, secondary, envs, stress, next, cue) {
+  return { id: slugId(name), name, muscle, equipment, type, region, repRange, lengthened, secondary, envs, stress, next, cue };
+}
+EXERCISES.push(
+  xp("Wide-Grip Bench Press", "chest", "barbell", "compound", "upper", [6, 10], true, ["shoulders", "triceps"], ["gym"], ["shoulder"], null, "Grip a thumb-length wider than usual, lower slow to mid-chest, and let the pecs stretch fully before you press."),
+  xp("Smith Machine Incline Press", "chest", "smith", "compound", "upper", [8, 12], true, ["shoulders", "triceps"], ["gym"], ["shoulder"], null, "Set the bench so the bar meets just below your collarbones; sink into the stretch, then drive without shrugging."),
+  xp("Incline Machine Press", "chest", "machine", "compound", "upper", [8, 12], false, ["shoulders", "triceps"], ["gym"], [], null, "Set the seat so the handles start at lower-chest height, and control them back until the upper pecs pull tight."),
+  xp("Cable Fly (High-to-Low)", "chest", "cable", "isolation", "upper", [12, 16], true, ["shoulders"], ["gym"], [], null, "Pulleys high, sweep down and in toward your hips, then open wide until the lower pec stretches hard."),
+  xp("Dumbbell Fly", "chest", "dumbbell", "isolation", "upper", [10, 14], true, ["shoulders"], ["gym"], [], null, "Soft elbows, open the arms until the pecs pull deep, then hug the bells together without pressing."),
+  xp("Decline Push-Up", "chest", "bodyweight", "compound", "upper", [8, 16], true, ["shoulders", "triceps"], ["home", "calisthenics"], [], "Archer Push-Up", "Feet up on a chair or bench, lower your chest to the floor under control, and press without letting the hips sag."),
+  xp("Smith Machine Shoulder Press", "shoulders", "smith", "compound", "upper", [6, 10], false, ["triceps"], ["gym"], ["shoulder"], null, "Line the bar up with your ears, lower to chin level under control, and press without arching off the pad."),
+  xp("Incline Dumbbell Lateral Raise", "shoulders", "dumbbell", "isolation", "upper", [10, 14], true, [], ["gym"], [], null, "Lie sideways on an incline bench and raise from a full hang; the bottom stretch is the rep, so lower it slow."),
+  xp("Chest-Supported Dumbbell Rear-Delt Fly", "shoulders", "dumbbell", "isolation", "upper", [12, 16], false, ["back"], ["gym"], [], null, "Chest glued to the incline pad, sweep the bells wide with pinkies leading, pause a beat, then lower slow."),
+  xp("Pseudo Planche Push-Up", "shoulders", "bodyweight", "compound", "upper", [4, 12], false, ["chest", "triceps"], ["home", "calisthenics"], ["shoulder"], "Wall Handstand Push-Up", "Hands at your waistline with fingers turned back, lean hard over your wrists and press; the lean is the work."),
+  xp("Single-Arm Cable Pushdown", "triceps", "cable", "isolation", "upper", [10, 14], false, [], ["gym"], [], null, "Pin the elbow to your ribs, extend until the triceps locks hard, and resist the cable dragging it back up."),
+  xp("Machine Triceps Extension", "triceps", "machine", "isolation", "upper", [10, 14], false, [], ["gym"], ["elbow"], null, "Set the pad so your elbows stay level, extend to full lockout, and let the weight bend your arms back slowly."),
+  xp("Overhead Dumbbell Triceps Extension", "triceps", "dumbbell", "isolation", "upper", [10, 14], true, [], ["gym"], ["elbow"], null, "Elbows tight by your ears, drop the bell deep behind your head, and feel the long head stretch before you extend."),
+  xp("Smith Machine Row", "back", "smith", "compound", "upper", [8, 12], false, ["biceps", "shoulders", "traps"], ["gym"], ["spine"], null, "Hinge to 45 degrees, brace hard, and drag the bar into your lower ribs without standing up between reps."),
+  xp("Machine High Row", "back", "machine", "compound", "upper", [8, 12], true, ["biceps", "shoulders"], ["gym"], [], null, "Let the handles pull your shoulder blades forward at the stretch, then drive your elbows down toward your hips."),
+  xp("Wide-Grip Lat Pulldown", "back", "cable", "compound", "upper", [10, 14], true, ["biceps", "shoulders"], ["gym"], [], null, "Grip a fist-width outside your shoulders, lean back slightly, and pull the bar to your upper chest, elbows wide."),
+  xp("Wide-Grip Cable Row", "back", "cable", "compound", "upper", [10, 14], true, ["shoulders", "traps", "biceps"], ["gym"], [], null, "Row the wide bar to your sternum with elbows flared, letting the shoulder blades protract fully at each stretch."),
+  xp("Tuck Front Lever Row", "back", "bodyweight", "compound", "upper", [4, 10], false, ["biceps", "abs"], ["gym", "calisthenics"], [], null, "Hold a tight tuck with hips level to your shoulders and row the bar to your waist without letting the hips sag."),
+  xp("Scapular Pull-Up", "traps", "bodyweight", "isolation", "upper", [6, 15], true, ["back", "forearms"], ["gym", "calisthenics"], [], "Pull-Up", "From a dead hang, pull the shoulder blades down and together without bending the elbows, then ride them back up."),
+  xp("Towel Pull-Up", "forearms", "bodyweight", "compound", "upper", [3, 10], false, ["back", "biceps"], ["gym", "calisthenics"], [], null, "Drape two towels over the bar, crush them like you're wringing out water, and pull your chin over your fists."),
+  xp("Spider Curl", "biceps", "dumbbell", "isolation", "upper", [10, 14], false, [], ["gym"], [], null, "Chest pinned to the incline bench, arms hanging straight down; curl without letting the elbows drift back."),
+  xp("Concentration Curl", "biceps", "dumbbell", "isolation", "upper", [10, 14], false, [], ["gym"], [], null, "Brace your triceps against your inner thigh and curl to the shoulder without rocking your torso to help."),
+  xp("Cable Curl", "biceps", "cable", "isolation", "upper", [12, 16], false, [], ["gym"], [], null, "Stand a step back from the low pulley and curl with elbows pinned, resisting the cable all the way down."),
+  xp("Zottman Curl", "biceps", "dumbbell", "isolation", "upper", [10, 14], false, ["forearms"], ["gym"], [], null, "Curl palms-up, rotate to palms-down at the top, and lower on a slow count to load the forearms every rep."),
+  xp("Kelso Shrug", "traps", "dumbbell", "isolation", "upper", [12, 16], false, ["shoulders"], ["gym"], [], null, "Lie chest-down on an incline bench and shrug by squeezing the shoulder blades back, not up toward the ears."),
+  xp("Reverse Wrist Curl", "forearms", "dumbbell", "isolation", "upper", [12, 16], false, [], ["gym"], [], null, "Forearms flat on the bench palms-down, lift the backs of the hands as high as you can and lower under control."),
+  xp("Pause Squat", "quads", "barbell", "compound", "lower", [6, 10], true, ["glutes"], ["gym"], ["spine", "knee"], null, "Sink to full depth, stay braced through a dead-still 2-count, then drive up hard with zero bounce."),
+  xp("Box Squat", "quads", "barbell", "compound", "lower", [6, 10], false, ["glutes", "hamstrings"], ["gym"], ["spine"], null, "Push the hips back to a controlled touch on the box, keep shins vertical, then snap the hips through to stand."),
+  xp("Leg Press (Low Foot Placement)", "quads", "machine", "compound", "lower", [8, 12], true, ["glutes"], ["gym"], ["knee"], null, "Set feet low and hip-width, lower until the knees near your chest, and press through mid-foot without locking out."),
+  xp("Leg Press (High Foot Placement)", "glutes", "machine", "compound", "lower", [8, 12], true, ["hamstrings", "quads"], ["gym"], [], null, "Plant feet high and wide on the sled, pull the platform deep into hip flexion, and push through your heels."),
+  xp("Front-Foot Elevated Split Squat (Dumbbell)", "quads", "dumbbell", "compound", "lower", [8, 12], true, ["glutes"], ["gym"], ["knee"], null, "Front foot on a low plate, drive the knee far past the toes, and lower until the rear knee kisses the floor."),
+  xp("Snatch-Grip Romanian Deadlift", "hamstrings", "barbell", "compound", "lower", [8, 12], true, ["glutes"], ["gym"], ["spine"], null, "Take a wide grip, push hips straight back, and ride the bar down your thighs until the hamstrings scream."),
+  xp("Single-Leg Romanian Deadlift (Dumbbell)", "hamstrings", "dumbbell", "compound", "lower", [8, 12], true, ["glutes"], ["gym"], [], null, "Hinge over one flat foot, reach the dumbbell down your shin, and keep hips square as the rear leg counterbalances."),
+  xp("Cable Pull-Through", "glutes", "cable", "compound", "lower", [10, 14], true, ["hamstrings"], ["gym"], [], null, "Face away from a low pulley, hinge and let the rope pull deep between your legs, then squeeze glutes to stand tall."),
+  xp("45-Degree Back Extension (Glute Bias)", "glutes", "machine", "compound", "lower", [10, 14], true, ["hamstrings"], ["gym"], [], null, "Round the upper back, point toes out, and hinge only at the hips so the glutes do every inch of the lift."),
+  xp("Donkey Calf Raise", "calves", "machine", "isolation", "lower", [10, 14], true, [], ["gym"], [], null, "Stay bent at the hips to stretch the calves, drop the heels deep below the platform, and pause at the bottom."),
+  xp("Cossack Squat", "quads", "bodyweight", "compound", "lower", [6, 12], true, ["glutes"], ["gym", "calisthenics", "home"], [], "Pistol Squat (Assisted)", "Shift all your weight onto one bent leg, sit deep over that heel, and keep the straight leg's toes pointing up."),
+  xp("Wall Sit (seconds)", "quads", "bodyweight", "compound", "lower", [30, 60], false, ["glutes"], ["gym", "calisthenics", "home"], [], "Split Squat (Bodyweight)", "Slide down until the thighs are parallel, press your whole back flat into the wall, and breathe through the burn."),
+  xp("Reverse Nordic Curl", "quads", "bodyweight", "isolation", "lower", [6, 12], true, [], ["gym", "calisthenics", "home"], ["knee"], null, "Kneel tall, squeeze glutes, and lean your whole body back in one rigid line as far as the quads can control."),
+  xp("Plank (seconds)", "abs", "bodyweight", "isolation", "upper", [30, 60], false, ["shoulders", "glutes"], ["home", "gym"], [], "Long-Lever Plank (seconds)", "Squeeze glutes and tuck ribs toward hips so the low back stays dead flat, never sagging."),
+  xp("Long-Lever Plank (seconds)", "abs", "bodyweight", "isolation", "upper", [20, 45], false, ["shoulders"], ["home", "gym"], [], "Body Saw", "Walk the elbows out past your eyeline and hold a posterior pelvic tilt; farther elbows means harder abs."),
+  xp("Body Saw", "abs", "bodyweight", "isolation", "upper", [8, 15], true, ["shoulders"], ["home", "gym"], [], null, "From a forearm plank on towels or sliders, glide back only as far as the rib tuck holds, then pull forward."),
+  xp("Side Plank (seconds)", "abs", "bodyweight", "isolation", "upper", [20, 45], false, ["shoulders", "glutes"], ["home", "gym"], [], null, "Stack shoulder over elbow and drive the hips tall so ankles, hips, and shoulders form one straight line."),
+  xp("Hollow Body Hold (seconds)", "abs", "bodyweight", "isolation", "upper", [20, 45], false, [], ["home", "gym"], [], "V-Up", "Press the low back into the floor, then lower arms and legs only as far as it stays glued down."),
+  xp("Hanging Knee Raise", "abs", "bodyweight", "compound", "upper", [8, 15], false, ["forearms", "quads"], ["calisthenics", "gym"], [], "Hanging Leg Raise", "Curl the pelvis under as the knees rise — lift the hips toward the ribs instead of swinging the thighs."),
+  xp("Dragon Flag", "abs", "bodyweight", "compound", "upper", [3, 8], true, ["back", "glutes"], ["calisthenics", "home"], [], null, "Grip behind your head and lower a rigid body slowly from the shoulders; the hips must never break."),
+  xp("Tuck L-Sit (seconds)", "abs", "bodyweight", "compound", "upper", [10, 30], false, ["triceps", "shoulders", "quads"], ["calisthenics", "home"], [], "L-Sit (seconds)", "Push the floor away to depress the shoulders, then pull knees to chest and hold without leaning back."),
+  xp("L-Sit (seconds)", "abs", "bodyweight", "compound", "upper", [10, 30], false, ["triceps", "shoulders", "quads"], ["calisthenics", "home"], [], null, "Lock the elbows, press shoulders down, and lift straight legs to horizontal with toes pointed and knees locked."),
+  xp("Tuck Front Lever Hold (seconds)", "back", "bodyweight", "compound", "upper", [8, 20], false, ["abs", "shoulders", "forearms"], ["calisthenics"], ["shoulder", "elbow"], "Tuck Front Lever Row", "Hang, tuck the knees, and pull the bar toward your hips with straight arms until hips rise level with shoulders."),
+  xp("Wall Handstand Hold (seconds)", "shoulders", "bodyweight", "compound", "upper", [20, 60], false, ["triceps", "traps"], ["home", "gym"], ["shoulder"], "Chest-to-Wall Handstand Hold (seconds)", "Kick up, stack hips over shoulders over hands, and keep pushing tall through the floor for the whole hold."),
+  xp("Chest-to-Wall Handstand Hold (seconds)", "shoulders", "bodyweight", "compound", "upper", [20, 60], false, ["triceps", "traps"], ["home", "gym"], ["shoulder"], "Wall Handstand Push-Up", "Walk the feet up until only the toes touch the wall, tuck the ribs, and push shoulders to ears in one line."),
+);
+
 
 // Sanity: progression chains must resolve.
 for (const e of EXERCISES) {
