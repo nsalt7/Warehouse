@@ -1,25 +1,21 @@
-// End-to-end browser test: drives the real UI through a full user journey —
-// create a meso from a template, log week 1, answer feedback, verify week 2 is
-// generated with progressed sets and calibrated weights.
+// End-to-end browser test: drives the real UI through a complete mesocycle —
+// build a custom meso, log every week, answer check-ins, and verify the engine's
+// decisions (calibration, earned volume, deload) through what the UI shows and
+// what lands in localStorage.
 //
 // Run: npm i playwright (once), then `npm run test:e2e`.
 
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-const PORT = 4880;
+const PORT = 4881;
 const BASE = `http://localhost:${PORT}`;
-
-const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rp-e2e-'));
 const server = spawn(process.execPath, ['server.js'], {
-  cwd: ROOT,
-  env: { ...process.env, PORT: String(PORT), RP_DATA_DIR: dataDir },
-  stdio: 'inherit',
+  cwd: ROOT, env: { ...process.env, PORT: String(PORT) }, stdio: 'inherit',
 });
 
 let failed = false;
@@ -28,119 +24,166 @@ function assert(cond, msg) {
   if (!cond) throw new Error(`Assertion failed: ${msg}`);
 }
 
+const readState = (page) => page.evaluate(() => JSON.parse(localStorage.getItem('hypertrophy-coach:v1')));
+
 try {
-  // wait for server
   for (let i = 0; i < 50; i++) {
-    try { await fetch(`${BASE}/api/bootstrap`); break; } catch { await new Promise((r) => setTimeout(r, 100)); }
+    try { await fetch(BASE); break; } catch { await new Promise((r) => setTimeout(r, 100)); }
   }
 
-  // Use a system/pre-installed Chromium when Playwright's own download is absent.
   const sysChromium = ['/opt/pw-browsers/chromium', '/usr/bin/chromium', '/usr/bin/chromium-browser']
     .find((p) => fs.existsSync(p));
-  const browser = await chromium.launch(
-    process.env.PW_EXECUTABLE || sysChromium ? { executablePath: process.env.PW_EXECUTABLE || sysChromium } : {},
-  );
-  const page = await browser.newPage();
+  const browser = await chromium.launch(sysChromium ? { executablePath: sysChromium } : {});
+  const page = await browser.newPage({ viewport: { width: 1000, height: 800 } });
   page.on('pageerror', (e) => { throw e; });
 
-  // --- dashboard: empty state ---
+  // ---- empty state ----
   await page.goto(BASE);
   await page.waitForSelector('[data-testid="empty-state"]');
   step('dashboard shows empty state');
 
-  // --- builder: create from template ---
+  // ---- build a custom 4-week meso: 2 days, 1 exercise each ----
   await page.click('[data-testid="new-meso"]');
-  await page.waitForSelector('[data-testid="template-full-body-3x"]');
-  await page.click('[data-testid="template-full-body-3x"]');
-  await page.waitForFunction(() => document.querySelectorAll('[data-testid="day-editor"]').length === 3);
-  step('template loads 3 days into the builder');
-
+  await page.waitForSelector('[data-testid="meso-name"]');
   await page.fill('[data-testid="meso-name"]', 'E2E Meso');
-  await page.selectOption('[data-testid="meso-weeks"]', '4');
+  await page.click('[data-testid="meso-weeks"] [data-weeks="4"]');
+
+  await page.selectOption('[data-testid="muscle-pick-0"]', 'chest');
+  await page.selectOption('[data-testid="ex-pick-0"]', { label: 'Dumbbell Bench Press · stretch' });
+  await page.click('[data-testid="add-slot-0"]');
+  await page.click('[data-testid="add-day"]');
+  await page.selectOption('[data-testid="muscle-pick-1"]', 'quads');
+  await page.selectOption('[data-testid="ex-pick-1"]', { label: 'Back Squat · stretch' });
+  await page.click('[data-testid="add-slot-1"]');
   await page.click('[data-testid="create-meso"]');
   await page.waitForSelector('[data-testid="workout-title"]');
-  const rir = await page.textContent('[data-testid="rir-chip"]');
-  assert(rir.includes('2 RIR'), `week 1 of a 4-week meso should be 2 RIR, got "${rir}"`);
-  step('mesocycle created; week 1 shows correct RIR target');
+  step('custom mesocycle created via the builder');
 
-  // --- log all 3 workouts of week 1 with feedback ---
-  const boot = await (await fetch(`${BASE}/api/bootstrap`)).json();
-  const mesoId = boot.mesocycles[0].id;
+  const rir1 = await page.textContent('[data-testid="rir-chip"]');
+  assert(rir1.includes('3 RIR'), `week 1 compounds at 3 RIR, got "${rir1}"`);
 
-  for (let day = 0; day < 3; day++) {
+  // ---- helper: log the visible workout and submit the check-in ----
+  async function logWorkout({ weight, reps, feedback = { soreness: 1, workload: 1, pump: 1 } }) {
     await page.waitForSelector('[data-testid="workout-title"]');
-    const nCards = await page.locator('[data-testid="exercise-card"]').count();
-    assert(nCards >= 4, `workout should have several exercises, got ${nCards}`);
-
-    // fill every set of every exercise
-    for (let ei = 0; ei < nCards; ei++) {
+    const nEx = await page.locator('[data-testid="exercise-card"]').count();
+    for (let ei = 0; ei < nEx; ei++) {
       let si = 0;
       while (await page.locator(`[data-testid="weight-${ei}-${si}"]`).count()) {
-        await page.fill(`[data-testid="weight-${ei}-${si}"]`, '100');
-        await page.fill(`[data-testid="reps-${ei}-${si}"]`, '10');
-        await page.check(`[data-testid="done-${ei}-${si}"]`);
+        await page.fill(`[data-testid="weight-${ei}-${si}"]`, String(weight));
+        await page.fill(`[data-testid="reps-${ei}-${si}"]`, String(reps));
+        await page.click(`[data-testid="done-${ei}-${si}"]`);
         si++;
       }
-      assert(si >= 1, 'exercise has at least one set');
     }
-
-    // add + remove a set on the first exercise (manual set editing)
-    if (day === 0) {
-      const before = await page.locator('[data-testid^="weight-0-"]').count();
-      await page.click('[data-testid="add-set-0"]');
-      await page.waitForFunction((n) => document.querySelectorAll('[data-testid^="weight-0-"]').length === n + 1, before);
-      await page.fill(`[data-testid="weight-0-${before}"]`, '100');
-      await page.fill(`[data-testid="reps-0-${before}"]`, '10');
-      await page.check(`[data-testid="done-0-${before}"]`);
-      step('manually added a set mid-workout');
-    }
-
     await page.click('[data-testid="finish-workout"]');
     await page.waitForSelector('[data-testid="feedback-modal"]');
-
-    // answer all questions: never sore / no pump / easy → strong volume add signal
-    const muscles = await page.$$eval('[data-testid^="fb-"][class="fb-muscle"]', (els) => els.map((e) => e.dataset.testid.slice(3)));
+    const muscles = await page.$$eval('.fb-muscle', (els) => els.map((e) => e.dataset.testid.slice(3)));
     for (const m of muscles) {
-      await page.click(`[data-testid="fb-${m}-soreness-0"]`);
-      await page.click(`[data-testid="fb-${m}-pump-0"]`);
-      await page.click(`[data-testid="fb-${m}-workload-0"]`);
+      await page.click(`[data-testid="fb-${m}-soreness-${feedback.soreness}"]`);
+      await page.click(`[data-testid="fb-${m}-workload-${feedback.workload}"]`);
+      await page.click(`[data-testid="fb-${m}-pump-${feedback.pump}"]`);
     }
-    const disabled = await page.locator('[data-testid="fb-submit"]').isDisabled();
-    assert(!disabled, 'submit enables once all questions are answered');
+    assert(!(await page.locator('[data-testid="fb-submit"]').isDisabled()), 'check-in submit enables');
     await page.click('[data-testid="fb-submit"]');
     await page.waitForSelector('[data-testid="feedback-modal"]', { state: 'detached' });
-    step(`day ${day + 1} logged with feedback`);
   }
 
-  // --- week 2 must exist with progression applied ---
-  const meso = await (await fetch(`${BASE}/api/mesocycles/${mesoId}`)).json();
-  assert(meso.weeks.length === 2, `week 2 should be generated, have ${meso.weeks.length}`);
-  assert(meso.weeks[1].rirTarget === 1, 'week 2 of a 4-week meso is 1 RIR');
-  const v1 = meso.weeklyVolume[0];
-  const v2 = meso.weeklyVolume[1];
-  for (const m of Object.keys(v1)) {
-    assert(v2[m] >= v1[m], `${m} volume should not shrink after easy feedback (${v1[m]} → ${v2[m]})`);
-  }
-  assert(Object.values(v2).some((sets, i) => sets > Object.values(v1)[i]), 'at least one muscle gained sets');
-  const ex0 = meso.weeks[1].workouts[0].exercises[0];
-  assert(ex0.targetWeight === 100, `calibration should set 100 as target, got ${ex0.targetWeight}`);
-  assert(ex0.targetReps === 10, `calibration should set 10 reps target, got ${ex0.targetReps}`);
-  step('week 2 auto-generated: sets progressed, weights calibrated, RIR dropped');
+  // ---- week 1 (calibration) ----
+  // rest timer appears after logging a set, dismissible by tap
+  await page.fill('[data-testid="weight-0-0"]', '100');
+  await page.fill('[data-testid="reps-0-0"]', '10');
+  await page.click('[data-testid="done-0-0"]');
+  await page.waitForSelector('[data-testid="rest-timer"]');
+  step('rest timer starts when a set is logged');
+  await page.click('[data-testid="rest-timer"]');
+  await page.waitForSelector('[data-testid="rest-timer"]', { state: 'detached' });
 
-  // --- UI shows week 2 and the overview ---
-  await page.goto(`${BASE}/#/meso/${mesoId}`);
+  // manual set add/remove
+  const before = await page.locator('[data-testid^="weight-0-"]').count();
+  await page.click('[data-testid="add-set-0"]');
+  await page.waitForFunction((n) => document.querySelectorAll('[data-testid^="weight-0-"]').length === n + 1, before);
+  step('manually added a set mid-workout');
+
+  await logWorkout({ weight: 100, reps: 10 });   // day 1
+  await logWorkout({ weight: 100, reps: 10 });   // day 2 → week 2 generated
+
+  let s = await readState(page);
+  let meso = s.mesocycles[0];
+  assert(meso.weeks.length === 2, 'week 2 generated');
+  const w1chest = meso.weeks[0].workouts[0].exercises[0].sets.length;
+  const w2chest = meso.weeks[1].workouts[0].exercises[0].sets.length;
+  assert(w2chest === w1chest, `no comparison yet → volume holds (${w1chest} → ${w2chest})`);
+  assert(meso.weeks[1].workouts[0].exercises[0].targetWeight === 100, 'calibration adopted 100 as the working weight');
+  step('week 2: volume held (not yet earned), weights calibrated from week 1 logs');
+
+  // UI shows the calibrated target and last-week reference
   await page.waitForSelector('[data-testid="workout-title"]');
   const rir2 = await page.textContent('[data-testid="rir-chip"]');
-  assert(rir2.includes('1 RIR'), `UI should show week 2 at 1 RIR, got "${rir2}"`);
-  const placeholder = await page.getAttribute('[data-testid="weight-0-0"]', 'placeholder');
-  assert(placeholder === '100', 'weight input placeholder shows the target weight');
+  assert(rir2.includes('2 RIR'), `week 2 compounds at 2 RIR, got "${rir2}"`);
+  const ph = await page.getAttribute('[data-testid="weight-0-0"]', 'placeholder');
+  assert(ph === '100', `weight placeholder shows target, got "${ph}"`);
+  const lastCol = await page.textContent('.set-last');
+  assert(lastCol.includes('100 × 10'), `last-week column shows prior set, got "${lastCol}"`);
+  step('week 2 UI: RIR dropped, target + last-week reference visible');
 
+  // ---- week 2: beat week 1 → volume is earned ----
+  await logWorkout({ weight: 105, reps: 10 });
+  await logWorkout({ weight: 105, reps: 10 });
+  s = await readState(page);
+  meso = s.mesocycles[0];
+  assert(meso.weeks.length === 3, 'week 3 generated');
+  const w3chest = meso.weeks[2].workouts[0].exercises[0].sets.length;
+  assert(w3chest === w2chest + 1, `performance earned +1 set (${w2chest} → ${w3chest})`);
+  assert(meso.weeks[1].perf.chest === 1 && meso.weeks[1].perf.quads === 1, 'perf recorded as +1');
+  step('week 3: +1 set per muscle, earned by beating week 2');
+
+  // ---- week 3 (last accumulation) ----
+  await logWorkout({ weight: 105, reps: 10 });
+  await logWorkout({ weight: 105, reps: 10 });
+  s = await readState(page);
+  meso = s.mesocycles[0];
+  const deload = meso.weeks[3];
+  assert(deload.isDeload, 'week 4 is the deload');
+  const dChest = deload.workouts[0].exercises[0];
+  assert(dChest.sets.length === Math.ceil(w3chest / 2), `deload halves sets (${w3chest} → ${dChest.sets.length})`);
+  const w3target = meso.weeks[2].workouts[0].exercises[0].targetWeight;
+  assert(dChest.targetWeight < w3target, `deload load cut (${w3target} → ${dChest.targetWeight})`);
+  await page.waitForSelector('[data-testid="deload-chip"]');
+  step('deload week generated: half sets, reduced load, UI flags it');
+
+  // ---- overview mid-deload ----
   await page.click('[data-testid="to-overview"]');
   await page.waitForSelector('[data-testid="schedule-grid"]');
-  const gridText = await page.textContent('[data-testid="schedule-grid"]');
-  assert((gridText.match(/✓/g) || []).length === 3, 'schedule grid shows 3 completed workouts');
+  const grid = await page.textContent('[data-testid="schedule-grid"]');
+  assert((grid.match(/✓/g) || []).length === 6, 'schedule shows 6 done workouts');
   await page.waitForSelector('[data-testid="volume-panel"]');
-  step('overview shows schedule grid and volume panel');
+  await page.waitForSelector('[data-testid="pr-table"]');
+  const pr = await page.textContent('[data-testid="pr-table"]');
+  assert(pr.includes('Dumbbell Bench Press') && pr.includes('140'), `PR table shows e1RM (105×10 → 140), got: ${pr.slice(0, 120)}`);
+  step('overview: schedule grid, volume bars, and PR table all render');
+
+  // delete flow opens a confirm and cancel keeps the meso
+  await page.click('[data-testid="delete-meso"]');
+  await page.waitForSelector('[data-testid="confirm-modal"]');
+  await page.click('#cf-no');
+  step('delete asks for confirmation; cancel is safe');
+
+  // ---- finish the deload → meso completes ----
+  await page.click('[data-testid="back-to-workout"]');
+  await logWorkout({ weight: 90, reps: 5 });
+  await logWorkout({ weight: 90, reps: 5 });
+  await page.waitForSelector('[data-testid="meso-complete"]');
+  s = await readState(page);
+  assert(s.mesocycles[0].status === 'complete', 'meso marked complete in storage');
+  step('deload finished → mesocycle complete screen');
+
+  // ---- data survives reload; dashboard shows completed meso ----
+  await page.goto(`${BASE}/#/`);
+  await page.reload();
+  await page.waitForSelector('[data-testid="meso-card"]');
+  const card = await page.textContent('[data-testid="meso-card"]');
+  assert(card.includes('E2E Meso') && card.includes('Complete'), 'dashboard lists the completed meso after reload');
+  step('state persists across reload (localStorage)');
 
   await browser.close();
   console.log('\nE2E: all steps passed ✅');
@@ -150,6 +193,5 @@ try {
   console.error(err);
 } finally {
   server.kill();
-  fs.rmSync(dataDir, { recursive: true, force: true });
   process.exit(failed ? 1 : 0);
 }

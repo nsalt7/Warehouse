@@ -1,11 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  rirForWeek, setChangeFromFeedback, combineSetChanges, createMesocycle,
-  generateNextWeek, finishWorkout, weeklySetsPerMuscle, progressLoad,
-  currentPosition, DELOAD_RIR,
-} from '../src/engine.js';
-import { EXERCISES, VOLUME_LANDMARKS } from '../src/exercises.js';
+  rirForWeek, loadIncrement, roundLoad, progressExercise, exercisePerf,
+  musclePerf, muscleBrake, volumeDelta, createMesocycle, generateNextWeek,
+  finishWorkout, currentPosition, weeklySetsPerMuscle, reactiveDeloadDue,
+  e1rm, SESSION_SET_CAP, DELOAD_RIR,
+} from '../app/engine.js';
+import { EXERCISES, VOLUME_LANDMARKS, exercisesForMuscle } from '../app/exercises.js';
+import { TEMPLATES } from '../app/templates.js';
 
 const byName = (name) => EXERCISES.find((e) => e.name === name);
 
@@ -15,197 +17,271 @@ function sampleConfig(weeksTotal = 5) {
     weeksTotal,
     unit: 'lb',
     days: [
-      { name: 'Upper', slots: [{ exerciseId: byName('Barbell Bench Press').id }, { exerciseId: byName('Barbell Row').id }] },
-      { name: 'Lower', slots: [{ exerciseId: byName('Back Squat').id }, { exerciseId: byName('Lying Leg Curl').id }] },
+      { name: 'A', slots: [{ exerciseId: byName('Barbell Bench Press').id }, { exerciseId: byName('Back Squat').id }] },
+      { name: 'B', slots: [{ exerciseId: byName('Lat Pulldown').id }, { exerciseId: byName('Seated Leg Curl').id }] },
     ],
   };
 }
 
-function logAllSets(workout, { weight = 100, reps = 10 } = {}) {
-  for (const ex of workout.exercises) {
-    for (const s of ex.sets) {
-      s.weight = ex.targetWeight ?? weight;
-      s.reps = ex.targetReps ?? reps;
-      s.done = true;
+// Log every set of every exercise. weightFor(exercise) → weight, repsFor → reps.
+function logWeek(meso, weekIndex, weightFor, repsFor, feedback = { soreness: 1, workload: 1, pump: 1 }) {
+  const week = meso.weeks[weekIndex];
+  for (const workout of week.workouts) {
+    for (const wex of workout.exercises) {
+      for (const s of wex.sets) {
+        s.weight = weightFor(wex);
+        s.reps = repsFor(wex);
+        s.done = true;
+      }
     }
+    const fb = {};
+    for (const wex of workout.exercises) fb[wex.muscle] = { ...feedback };
+    finishWorkout(meso, weekIndex, workout.dayIndex, fb);
   }
 }
 
-test('RIR ramps down to 0 then deloads', () => {
-  assert.deepEqual([0, 1, 2, 3, 4].map((w) => rirForWeek(w, 5)), [3, 2, 1, 0, DELOAD_RIR]);
-  assert.deepEqual([0, 1, 2, 3].map((w) => rirForWeek(w, 4)), [2, 1, 0, DELOAD_RIR]);
-  assert.deepEqual([0, 1, 2, 3, 4, 5].map((w) => rirForWeek(w, 6)), [4, 3, 2, 1, 0, DELOAD_RIR]);
+// ---------------------------------------------------------------- RIR ramp
+
+test('RIR schedule: compounds never hit failure, isolation may in the final accumulation week', () => {
+  // 5-week meso: 4 accumulation + deload
+  assert.deepEqual(
+    [0, 1, 2, 3].map((w) => { const r = rirForWeek(w, 5); return [r.compound, r.isolation]; }),
+    [[3, 2], [2, 1], [1, 1], [1, 0]],
+  );
+  const deload = rirForWeek(4, 5);
+  assert.equal(deload.isDeload, true);
+  assert.equal(deload.compound, DELOAD_RIR);
+  // 4-week meso
+  assert.deepEqual(
+    [0, 1, 2].map((w) => { const r = rirForWeek(w, 4); return [r.compound, r.isolation]; }),
+    [[3, 2], [2, 1], [1, 0]],
+  );
 });
 
-test('set progression matrix follows soreness/pump/workload', () => {
-  // never sore, no pump, easy → strong add
-  assert.equal(setChangeFromFeedback({ soreness: 0, pump: 0, workload: 0 }), 3);
-  // never sore, decent pump, pretty good → +2
-  assert.equal(setChangeFromFeedback({ soreness: 0, pump: 1, workload: 1 }), 2);
-  // healed a while ago → +1
-  assert.equal(setChangeFromFeedback({ soreness: 1, pump: 1, workload: 1 }), 1);
-  // healed just in time → hold
-  assert.equal(setChangeFromFeedback({ soreness: 2, pump: 2, workload: 1 }), 0);
-  // pushed my limits knocks one off
-  assert.equal(setChangeFromFeedback({ soreness: 1, pump: 1, workload: 2 }), 0);
-  // still sore or too much → back off
-  assert.equal(setChangeFromFeedback({ soreness: 3, pump: 2, workload: 1 }), -1);
-  assert.equal(setChangeFromFeedback({ soreness: 0, pump: 2, workload: 3 }), -1);
-  // missing feedback → hold
-  assert.equal(setChangeFromFeedback(undefined), 0);
-  assert.equal(setChangeFromFeedback({}), 0);
+// ------------------------------------------------------------- increments
+
+test('load increments scale by lift type and are capped near 5% of the load', () => {
+  const squat = byName('Back Squat');
+  const curl = byName('Dumbbell Curl');
+  const bench = byName('Barbell Bench Press');
+  assert.equal(loadIncrement(squat, 300, 'lb'), 10);  // lower compound
+  assert.equal(loadIncrement(squat, 100, 'lb'), 5);   // 5% cap kicks in
+  assert.equal(loadIncrement(bench, 200, 'lb'), 5);   // upper compound
+  assert.equal(loadIncrement(curl, 30, 'lb'), 2.5);   // isolation micro-step
+  assert.equal(loadIncrement(squat, 140, 'kg'), 5);
+  assert.equal(roundLoad(102.4, 'lb'), 102.5);
 });
 
-test('combining changes: any back-off wins, otherwise average', () => {
-  assert.equal(combineSetChanges([2, -1]), -1);
-  assert.equal(combineSetChanges([1, 2]), 2);
-  assert.equal(combineSetChanges([0, 1]), 1);
-  assert.equal(combineSetChanges([]), 0);
+// ------------------------------------------------- double progression rules
+
+function makeWex(overrides = {}) {
+  return {
+    exerciseId: 1, muscle: 'chest', name: 'Barbell Bench Press', type: 'compound',
+    region: 'upper', repRange: [6, 10], secondary: [], targetWeight: 200,
+    missStreak: 0, prevSets: null, jointPain: 0,
+    sets: [
+      { weight: 200, reps: 10, done: true },
+      { weight: 200, reps: 10, done: true },
+    ],
+    ...overrides,
+  };
+}
+
+test('double progression: top of window on all sets triggers a load jump', () => {
+  const next = progressExercise(makeWex(), 'lb');
+  assert.equal(next.targetWeight, 205);
+  assert.equal(next.missStreak, 0);
+  assert.deepEqual(next.prevSets, [{ weight: 200, reps: 10 }, { weight: 200, reps: 10 }]);
 });
 
-test('createMesocycle starts near MEV and week 1 calibrates', () => {
+test('double progression: inside the window holds the load (chase reps)', () => {
+  const next = progressExercise(makeWex({
+    sets: [{ weight: 200, reps: 10, done: true }, { weight: 200, reps: 8, done: true }],
+  }), 'lb');
+  assert.equal(next.targetWeight, 200);
+});
+
+test('double progression: below window bottom twice running drops the load 5%', () => {
+  const missed = makeWex({ sets: [{ weight: 200, reps: 5, done: true }, { weight: 200, reps: 5, done: true }] });
+  const first = progressExercise(missed, 'lb');
+  assert.equal(first.targetWeight, 200);
+  assert.equal(first.missStreak, 1);
+  const second = progressExercise({ ...missed, missStreak: 1 }, 'lb');
+  assert.equal(second.targetWeight, 190);
+  assert.equal(second.missStreak, 0);
+});
+
+test('calibration week adopts the heaviest logged weight; unlogged work carries forward', () => {
+  const cal = progressExercise(makeWex({
+    targetWeight: null,
+    sets: [{ weight: 135, reps: 10, done: true }, { weight: 155, reps: 8, done: true }],
+  }), 'lb');
+  assert.equal(cal.targetWeight, 155);
+  const skipped = progressExercise(makeWex({ sets: [{ weight: null, reps: null, done: false }] }), 'lb');
+  assert.equal(skipped.targetWeight, 200);
+});
+
+// ------------------------------------------------------- performance signal
+
+test('exercisePerf judges best-set quality, robust to set-count changes', () => {
+  const prev = makeWex();
+  assert.equal(exercisePerf(prev, makeWex({ sets: [{ weight: 205, reps: 8, done: true }] })), 1);
+  assert.equal(exercisePerf(prev, makeWex({ sets: [{ weight: 200, reps: 9, done: true }, { weight: 200, reps: 9, done: true }, { weight: 200, reps: 9, done: true }] })), -1);
+  assert.equal(exercisePerf(prev, makeWex()), 0);
+  assert.equal(exercisePerf(prev, makeWex({ sets: [{ weight: null, reps: null, done: false }] })), null);
+});
+
+test('volumeDelta: performance accelerates, feedback only brakes', () => {
+  assert.equal(volumeDelta(1, false), 1);
+  assert.equal(volumeDelta(1, true), 0);   // progressing at high recovery cost → hold
+  assert.equal(volumeDelta(0, false), 0);  // unearned volume is never added
+  assert.equal(volumeDelta(0, true), 0);
+  assert.equal(volumeDelta(-1, false), -1);
+  assert.equal(volumeDelta(-1, true), -2); // overreached
+});
+
+// ---------------------------------------------------------------- meso flow
+
+test('createMesocycle starts near evidence-based starting volume, week 1 calibrates', () => {
   const meso = createMesocycle(sampleConfig(), 'm1');
   assert.equal(meso.weeks.length, 1);
-  const w1 = meso.weeks[0];
-  assert.equal(w1.rirTarget, 3);
-  const vol = weeklySetsPerMuscle(w1);
-  // one chest slot/week → sets = round(MEV 8 / 1) capped at 5
-  assert.equal(vol.chest, 5);
-  for (const workout of w1.workouts) {
-    for (const ex of workout.exercises) {
-      assert.equal(ex.targetWeight, null);
-      assert.equal(ex.targetReps, null);
-    }
+  const vol = weeklySetsPerMuscle(meso.weeks[0], { fractional: false });
+  assert.equal(vol.chest, 5); // one slot, capped at 5 sets/slot
+  for (const w of meso.weeks[0].workouts) {
+    for (const wex of w.exercises) assert.equal(wex.targetWeight, null);
   }
 });
 
-test('calibration week sets next-week targets from logs', () => {
-  const prev = {
-    targetWeight: null, targetReps: null, repRange: [5, 10],
-    sets: [
-      { weight: 135, reps: 10, done: true },
-      { weight: 155, reps: 8, done: true },
-      { weight: 155, reps: 7, done: true },
-    ],
-  };
-  assert.deepEqual(progressLoad(prev), { targetWeight: 155, targetReps: 7 });
-});
-
-test('hitting targets bumps weight ~2.5%, missing holds it', () => {
-  const hit = {
-    targetWeight: 200, targetReps: 8, repRange: [5, 10],
-    sets: [
-      { weight: 200, reps: 8, done: true },
-      { weight: 200, reps: 9, done: true },
-    ],
-  };
-  assert.deepEqual(progressLoad(hit), { targetWeight: 205, targetReps: 8 });
-  const missed = {
-    targetWeight: 200, targetReps: 8, repRange: [5, 10],
-    sets: [
-      { weight: 200, reps: 8, done: true },
-      { weight: 200, reps: 6, done: true },
-    ],
-  };
-  assert.deepEqual(progressLoad(missed), { targetWeight: 200, targetReps: 8 });
-  const incomplete = {
-    targetWeight: 200, targetReps: 8, repRange: [5, 10],
-    sets: [
-      { weight: 200, reps: 8, done: true },
-      { weight: null, reps: null, done: false },
-    ],
-  };
-  assert.deepEqual(progressLoad(incomplete), { targetWeight: 200, targetReps: 8 });
-});
-
-test('finishing a full week generates the next week with progressed sets', () => {
+test('fractional volume counts indirect work at 0.5 sets', () => {
   const meso = createMesocycle(sampleConfig(), 'm1');
-  const w1 = meso.weeks[0];
-  const startVol = weeklySetsPerMuscle(w1);
-
-  // easy week: never sore, no pump, easy for every muscle
-  for (const workout of w1.workouts) {
-    logAllSets(workout, { weight: 100, reps: 10 });
-    const fb = {};
-    for (const ex of workout.exercises) fb[ex.muscle] = { soreness: 0, pump: 0, workload: 0 };
-    const res = finishWorkout(meso, 0, workout.dayIndex, fb);
-    if (workout.dayIndex === w1.workouts.length - 1) assert.equal(res.weekGenerated, true);
-  }
-
-  assert.equal(meso.weeks.length, 2);
-  const w2 = meso.weeks[1];
-  assert.equal(w2.rirTarget, 2);
-  const vol2 = weeklySetsPerMuscle(w2);
-  for (const m of Object.keys(startVol)) {
-    assert.ok(vol2[m] > startVol[m], `${m} should gain sets (${startVol[m]} → ${vol2[m]})`);
-    assert.ok(vol2[m] <= VOLUME_LANDMARKS[m].mrv, `${m} must stay ≤ MRV`);
-  }
-  // calibration produced weight targets for week 2
-  for (const workout of w2.workouts) {
-    for (const ex of workout.exercises) {
-      assert.equal(ex.targetWeight, 100);
-      assert.equal(ex.targetReps, 10);
-    }
-  }
+  const vol = weeklySetsPerMuscle(meso.weeks[0]);
+  // bench press gives triceps 0.5 x 5 sets
+  assert.equal(vol.triceps, 2.5);
+  assert.ok(vol.glutes > 0); // squat spillover
 });
 
-test('"still sore" backs volume off but never below 1 set per slot', () => {
-  const meso = createMesocycle(sampleConfig(), 'm1');
-  const w1 = meso.weeks[0];
-  for (const workout of w1.workouts) {
-    logAllSets(workout);
-    const fb = {};
-    for (const ex of workout.exercises) fb[ex.muscle] = { soreness: 3, pump: 2, workload: 3 };
-    finishWorkout(meso, 0, workout.dayIndex, fb);
-  }
-  const vol1 = weeklySetsPerMuscle(meso.weeks[0]);
-  const vol2 = weeklySetsPerMuscle(meso.weeks[1]);
-  for (const m of Object.keys(vol1)) {
-    assert.equal(vol2[m], Math.max(1, vol1[m] - 1), m);
-  }
-});
-
-test('volume is capped at MRV over many easy weeks, then deload halves week-1 sets', () => {
+test('volume rises only when performance improves, and set targets respect the weekly cap', () => {
   const meso = createMesocycle(sampleConfig(6), 'm1');
-  for (let wk = 0; wk < meso.weeksTotal - 1; wk++) {
-    const week = meso.weeks[wk];
-    for (const workout of week.workouts) {
-      logAllSets(workout);
-      const fb = {};
-      for (const ex of workout.exercises) fb[ex.muscle] = { soreness: 0, pump: 0, workload: 0 };
-      finishWorkout(meso, wk, workout.dayIndex, fb);
-    }
-    const nextVol = weeklySetsPerMuscle(meso.weeks[meso.weeks.length - 1]);
-    for (const [m, sets] of Object.entries(nextVol)) {
-      assert.ok(sets <= VOLUME_LANDMARKS[m].mrv, `${m} ${sets} ≤ MRV`);
-    }
+  // Week 1 (calibration): 100 lb x 10 everywhere.
+  logWeek(meso, 0, () => 100, () => 10);
+  assert.equal(meso.weeks.length, 2);
+  const v1 = weeklySetsPerMuscle(meso.weeks[0], { fractional: false });
+  const v2 = weeklySetsPerMuscle(meso.weeks[1], { fractional: false });
+  // No week-over-week comparison yet → no earned volume → hold.
+  assert.deepEqual(v2, v1);
+  // Week 2: all exercises progressed (heavier bests) → perf +1 → week 3 adds sets.
+  logWeek(meso, 1, (wex) => wex.targetWeight + 5, () => 10);
+  const v3 = weeklySetsPerMuscle(meso.weeks[2], { fractional: false });
+  for (const m of Object.keys(v1)) {
+    assert.equal(v3[m], v2[m] + 1, `${m} earned exactly +1 set`);
+    assert.ok(v3[m] <= VOLUME_LANDMARKS[m].maxVolume);
   }
-  const deload = meso.weeks[meso.weeksTotal - 1];
-  assert.equal(deload.isDeload, true);
-  assert.equal(deload.rirTarget, DELOAD_RIR);
-  const w1Vol = weeklySetsPerMuscle(meso.weeks[0]);
-  const dVol = weeklySetsPerMuscle(deload);
-  for (const m of Object.keys(w1Vol)) {
-    assert.equal(dVol[m], Math.ceil(w1Vol[m] / 2) * 1, m); // one slot per muscle in sample config
-  }
-  // deload load ≈ 55% of progressed weight
-  const ex = deload.workouts[0].exercises[0];
-  assert.ok(ex.targetWeight < 100 * 0.7, 'deload weight is reduced');
+  assert.deepEqual(meso.weeks[1].perf, { chest: 1, quads: 1, back: 1, hamstrings: 1 });
+});
 
-  // finishing the deload completes the meso
-  for (const workout of deload.workouts) {
-    logAllSets(workout);
-    const res = finishWorkout(meso, deload.index, workout.dayIndex, {});
-    if (workout.dayIndex === deload.workouts.length - 1) assert.equal(res.mesoComplete, true);
+test('the brake holds volume even when performance improves', () => {
+  const meso = createMesocycle(sampleConfig(6), 'm1');
+  logWeek(meso, 0, () => 100, () => 10);
+  // progressed, but "too much" workload → hold
+  logWeek(meso, 1, (wex) => wex.targetWeight + 5, () => 10, { soreness: 1, workload: 3, pump: 1 });
+  const v2 = weeklySetsPerMuscle(meso.weeks[1], { fractional: false });
+  const v3 = weeklySetsPerMuscle(meso.weeks[2], { fractional: false });
+  assert.deepEqual(v3, v2);
+});
+
+test('regression cuts volume; regression + brake cuts it harder', () => {
+  const meso = createMesocycle(sampleConfig(6), 'm1');
+  logWeek(meso, 0, () => 100, () => 10);
+  logWeek(meso, 1, () => 100, () => 10); // flat
+  // Week 3: everything regresses AND still sore → -2 per muscle
+  logWeek(meso, 2, () => 90, () => 8, { soreness: 3, workload: 2, pump: 1 });
+  const v3 = weeklySetsPerMuscle(meso.weeks[2], { fractional: false });
+  const v4 = weeklySetsPerMuscle(meso.weeks[3], { fractional: false });
+  for (const m of Object.keys(v3)) {
+    assert.equal(v4[m], Math.max(1, v3[m] - 2), m);
   }
+});
+
+test('two consecutive regressing weeks on 2+ muscles trigger a reactive deload', () => {
+  const meso = createMesocycle(sampleConfig(6), 'm1');
+  logWeek(meso, 0, () => 100, () => 10);
+  logWeek(meso, 1, () => 100, () => 10);
+  logWeek(meso, 2, () => 90, () => 8);   // regression week 1
+  assert.equal(meso.reactiveDeload, false);
+  logWeek(meso, 3, () => 80, () => 6);   // regression week 2 → deload fires
+  assert.equal(meso.reactiveDeload, true);
+  const deload = meso.weeks[meso.weeks.length - 1];
+  assert.equal(deload.isDeload, true);
+  assert.equal(meso.weeksTotal, deload.index + 1); // meso ends early
+});
+
+test('scheduled deload halves sets, cuts load 10%, keeps frequency; finishing it completes the meso', () => {
+  const meso = createMesocycle(sampleConfig(4), 'm1');
+  logWeek(meso, 0, () => 100, () => 10);
+  logWeek(meso, 1, (wex) => wex.targetWeight, () => 10);
+  logWeek(meso, 2, (wex) => wex.targetWeight, () => 10);
+  const deload = meso.weeks[3];
+  assert.equal(deload.isDeload, true);
+  assert.equal(deload.workouts.length, meso.days.length); // frequency kept
+  deload.workouts.forEach((w, di) => {
+    w.exercises.forEach((wex, ei) => {
+      const prev = meso.weeks[2].workouts[di].exercises[ei];
+      assert.equal(wex.sets.length, Math.max(1, Math.ceil(prev.sets.length / 2)));
+      assert.equal(wex.targetWeight, roundLoad(prev.targetWeight * 0.9, 'lb'));
+    });
+  });
+  logWeek(meso, 3, (wex) => wex.targetWeight, () => 5);
   assert.equal(meso.status, 'complete');
   assert.equal(currentPosition(meso), null);
 });
 
-test('currentPosition walks through pending workouts in order', () => {
+test('per-session set cap: added volume stops when every session is saturated', () => {
+  // One chest slot on one day: cap should stop growth at SESSION_SET_CAP.
+  const meso = createMesocycle({
+    name: 'Cap', weeksTotal: 6, unit: 'lb',
+    days: [{ name: 'A', slots: [{ exerciseId: byName('Barbell Bench Press').id }, { exerciseId: byName('Back Squat').id }] }],
+  }, 'm1');
+  for (let w = 0; w < 4; w++) {
+    logWeek(meso, w, (wex) => (wex.targetWeight ?? 100) + 5, () => 10);
+  }
+  for (const week of meso.weeks) {
+    const chestOnDay = week.workouts[0].exercises.filter((e) => e.muscle === 'chest')
+      .reduce((a, e) => a + e.sets.length, 0);
+    assert.ok(chestOnDay <= SESSION_SET_CAP, `week ${week.index}: ${chestOnDay} <= ${SESSION_SET_CAP}`);
+  }
+});
+
+test('muscleBrake fires on joint pain across half the muscle exercises', () => {
   const meso = createMesocycle(sampleConfig(), 'm1');
-  assert.deepEqual(currentPosition(meso), { weekIndex: 0, dayIndex: 0 });
-  logAllSets(meso.weeks[0].workouts[0]);
-  finishWorkout(meso, 0, 0, {});
-  assert.deepEqual(currentPosition(meso), { weekIndex: 0, dayIndex: 1 });
+  const week = meso.weeks[0];
+  week.workouts[0].exercises[0].jointPain = 2; // chest's only exercise
+  assert.equal(muscleBrake(week, 'chest'), true);
+  assert.equal(muscleBrake(week, 'quads'), false);
+});
+
+// ----------------------------------------------------------------- misc
+
+test('every template resolves and creates a valid mesocycle', () => {
+  for (const t of TEMPLATES) {
+    const meso = createMesocycle({ name: t.name, weeksTotal: t.weeksTotal, unit: 'lb', days: t.days }, 't');
+    assert.ok(meso.weeks[0].workouts.length === t.days.length, t.id);
+    // starting volume never exceeds the per-session cap on any day
+    for (const w of meso.weeks[0].workouts) {
+      const perMuscle = {};
+      for (const e of w.exercises) perMuscle[e.muscle] = (perMuscle[e.muscle] || 0) + e.sets.length;
+      for (const [m, sets] of Object.entries(perMuscle)) {
+        assert.ok(sets <= SESSION_SET_CAP, `${t.id} ${w.name} ${m}: ${sets}`);
+      }
+    }
+  }
+});
+
+test('lengthened-biased exercises rank first within a muscle', () => {
+  const chest = exercisesForMuscle('chest');
+  assert.equal(chest[0].lengthened, true);
+});
+
+test('e1rm math', () => {
+  assert.equal(e1rm(200, 10), 267);
+  assert.equal(e1rm(null, 5), null);
 });

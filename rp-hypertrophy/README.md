@@ -1,46 +1,61 @@
-# Hypertrophy Coach (local)
+# Hypertrophy Coach
 
-A local-first rebuild of the core features of the **RP Hypertrophy** app: mesocycle
-planning, RIR-ramped workout logging, and RP-style autoregulation — your
-soreness / pump / workload answers drive next week's set counts, and hitting rep
-targets drives the weight progression. All data stays on your machine in a JSON file.
+A local-first hypertrophy training app with an original, evidence-based
+progression engine. Plan a mesocycle, log your sets, answer a 20-second check-in,
+and the engine decides next week's volume, loads, and — when needed — your deload.
+Everything stays on your device.
 
-See [PLAN.md](PLAN.md) for the research summary and design.
+**The engine's rule, in one line: performance drives volume up; how you feel can
+only hold it or pull it back.** The full literature (volume dose-response,
+RIR/failure proximity, autoregulation signals, deload research, load progression)
+is cited inline in [`app/engine.js`](app/engine.js); design notes in
+[PLAN.md](PLAN.md).
 
 ## Run it
 
-Requires Node.js ≥ 18. No dependencies to install.
+Requires Node.js ≥ 18 (only to serve static files — there is no backend).
 
 ```sh
 node server.js
 # → http://localhost:4780
 ```
 
-Your training data is stored in `data/db.json` (gitignored). Back it up by copying the file.
+Data lives in your browser's localStorage. Use **Data → Export backup** for a
+JSON file you can restore on any machine.
 
-## How to use it
+## Using it
 
-1. **Create a mesocycle** — pick one of the built-in templates (Full Body, Upper/Lower,
-   PPL, Glute Emphasis) or build your own: choose 4–6 weeks, training days, and
-   exercises per day from the built-in library. Week 1 starts each muscle near its
-   MEV (minimum effective volume).
-2. **Week 1 is calibration** — find working weights you could lift for the shown rep
-   range at the week's RIR target, and log weight × reps for each set.
-3. **Finish each workout** and answer the questions per muscle (soreness since last
-   session, pump, workload). When the week's last workout is done, next week is
-   generated automatically:
-   - recovering easily + weak pump → sets are added (capped at MRV)
-   - barely recovering → sets hold
-   - still sore / "too much" → sets are pulled back
-   - hit all rep targets → weight goes up ~2.5% (rounded to 2.5)
-   - RIR target drops each week (3 → 2 → 1 → 0)
-4. **Deload** — the final week auto-generates with half the sets and light loads.
-5. **Overview page** — week × day schedule grid and weekly sets per muscle vs
-   MEV/MRV landmarks.
+1. **Plan** — pick one of 10 coach-built templates (beginner full-body through
+   6-day PPL and specialization blocks) or build custom days from a ~75-exercise
+   library. Stretch-position exercises are flagged and listed first.
+2. **Week 1 calibrates** — find working weights for the shown rep range at the
+   target RIR. The engine adopts what you actually lift.
+3. **Train and check in** — log weight × reps per set (one-tap logging adopts
+   your targets), rest timer runs between sets, and after each workout you answer
+   three questions per muscle plus an optional joint-pain flag.
+4. **The engine programs next week** —
+   - beat last week on a muscle's exercises → it earns a set (up to a per-muscle
+     weekly ceiling and an 8-set per-session cap)
+   - flat performance → volume holds; still sore / "too much" / joint pain →
+     volume comes back down
+   - top of the rep window on every set → the load goes up next week
+   - RIR ramps 3 → 1 (isolation may hit failure in the last hard week)
+5. **Deload** — the final week runs at half sets and −10% load automatically. If
+   your performance regresses two weeks running across several muscles, the
+   deload fires **early** — that's overreaching, and digging deeper doesn't grow.
+6. **Review** — schedule grid, weekly sets per muscle vs landmarks, best-set
+   e1RM table.
 
 ## Tests
 
 ```sh
-npm test          # engine + API tests (node:test, no deps)
-npm run test:e2e  # browser end-to-end test (needs `npm i playwright` once)
+npm test          # 20 unit tests covering every engine rule (no deps)
+npm run test:e2e  # Playwright: a full mesocycle driven through the real UI
+                  # (needs `npm i playwright` once)
 ```
+
+## Roadmap
+
+The app is deliberately a dependency-free static bundle (`app/`) with storage
+behind a tiny interface (`app/store.js`), so packaging it as an iOS app is a
+Capacitor/WKWebView wrap rather than a rewrite.
